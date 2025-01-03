@@ -48,69 +48,127 @@ class LeRobotV2Dataset:
             sample_weights = json.load(f)
             
         # Set random seed
-        tf.random.set_seed(seed)
         np.random.seed(seed)
         
-        # Initialize datasets
-        self.name2dataset = {}
+        # Initialize datasets and counters
+        self.datasets = {}
+        self.episode_counters = {}
+        self.repeat = repeat
         self.sample_weights = []
-        
+
         for dataset_name in self.dataset_names:
-            # Load dataset and preprocess all episodes
-            lerobot_dataset = LeRobotDataset(dataset_name)
-
-            # collect episodes by feature
-            collected_features = {}
-            first_episode = self._collect_episode(lerobot_dataset, 0)
-            first_processed = self._preprocess_episode(first_episode, dataset_name)
-            for key in first_processed.keys():
-                collected_features[key] = []
-            
-            # Pre-process all episodes and convert to the format we need
-            for episode_idx in range(lerobot_dataset.num_episodes):
-                episode = self._collect_episode(lerobot_dataset, episode_idx)
-                
-                processed = self._preprocess_episode(episode, dataset_name)
-                for key in processed.keys():
-                    collected_features[key].append(processed[key])
-
-            print("processed_episodes collected")
-            
-            # Convert to tensor format
-            # Each processed episode should now be a dict of tensors
-            dataset = tf.data.Dataset.from_tensor_slices(collected_features)
-            print("dataset created")
-
-            if repeat:
-                dataset = dataset.repeat()
-                
-            self.name2dataset[dataset_name] = iter(dataset)
+            self.datasets[dataset_name] = LeRobotDataset(dataset_name)
+            self.episode_counters[dataset_name] = 0
             self.sample_weights.append(sample_weights[dataset_name])
-            
+
         # Normalize weights
         self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
         self.sample_weights /= np.sum(self.sample_weights)
 
-    def _collect_episode(self, lerobot_dataset, episode_idx):
-        """Convert a full episode from LeRobotDataset to tensor format."""
-        # Get episode boundaries
-        from_idx = lerobot_dataset.episode_data_index["from"][episode_idx].item()
-        to_idx = lerobot_dataset.episode_data_index["to"][episode_idx].item()
+        # # Initialize datasets
+        # self.name2dataset = {}
+        # self.sample_weights = []
         
-        # Get all frames for this episode
-        print(f"from_idx: {from_idx}, to_idx: {to_idx}")
-        frames = lerobot_dataset.hf_dataset[from_idx:to_idx]
-        
-        # Convert to tensors - frames is now a datasets.Dataset object
-        # which already contains all our data in a batch
-        episode_data = {}
+        # for dataset_name in self.dataset_names:
+        #     # Load dataset and preprocess all episodes
+        #     lerobot_dataset = LeRobotDataset(dataset_name)
 
+        #     # collect episodes by feature
+        #     collected_features = {}
+        #     first_episode = self._collect_episode(lerobot_dataset, 0)
+        #     first_processed = self._preprocess_episode(first_episode, dataset_name)
+        #     for key in first_processed.keys():
+        #         collected_features[key] = []
+            
+        #     # Pre-process all episodes and convert to the format we need
+        #     for episode_idx in range(lerobot_dataset.num_episodes):
+        #         episode = self._collect_episode(lerobot_dataset, episode_idx)
+                
+        #         processed = self._preprocess_episode(episode, dataset_name)
+        #         for key in processed.keys():
+        #             collected_features[key].append(processed[key])
+
+        #     print("processed_episodes collected")
+            
+        #     # Convert to tensor format
+        #     # Each processed episode should now be a dict of tensors
+        #     dataset = tf.data.Dataset.from_tensor_slices(collected_features)
+        #     print("dataset created")
+
+        #     if repeat:
+        #         dataset = dataset.repeat()
+                
+        #     self.name2dataset[dataset_name] = iter(dataset)
+        #     self.sample_weights.append(sample_weights[dataset_name])
+            
+        # # Normalize weights
+        # self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
+        # self.sample_weights /= np.sum(self.sample_weights)
+
+    def get_episode(self, dataset_name):
+        """Get next episode from a dataset."""
+        dataset = self.datasets[dataset_name]
+        counter = self.episode_counters[dataset_name]
+        
+        # Reset counter if needed
+        if counter >= dataset.num_episodes:
+            if not self.repeat:
+                raise StopIteration
+            counter = 0
+            
+        # Get episode boundaries
+        from_idx = dataset.episode_data_index["from"][counter].item()
+        to_idx = dataset.episode_data_index["to"][counter].item()
+        
+        # Get episode frames from parquet
+        print(f"from_idx: {from_idx}, to_idx: {to_idx}")
+        frames = dataset.hf_dataset[from_idx:to_idx]
+        # print(dataset.features)
+        # print(dataset.hf_features)
+
+        # Get video data for each camera
+        camera_keys = [k for k in dataset.features.keys() if k.startswith('observation.images.')]
+        timestamps = [frame.item() for frame in frames["timestamp"]]     
+        query_timestamps = {
+            camera_key: timestamps for camera_key in camera_keys
+        }
+        video_frames = dataset._query_videos(query_timestamps, counter)
+        
+        # Create episode data combining parquet and video data
+        episode_data = {}
         for key in frames.keys():
-            # Stack PyTorch tensors then convert to TF
-            stacked = torch.stack(frames[key])
-            episode_data[key] = tf.convert_to_tensor(stacked.numpy(), dtype=tf.float32) 
-            episode_data['language_instruction'] = lerobot_dataset.meta.episodes[episode_idx]['tasks'][0]
+            if key not in camera_keys:  # Skip camera keys as we handle them separately
+                stacked = torch.stack(frames[key])
+                episode_data[key] = tf.convert_to_tensor(stacked.numpy(), dtype=tf.float32)
+        for camera_key in camera_keys:
+            episode_data[camera_key] = tf.convert_to_tensor(video_frames[camera_key].numpy(), dtype=tf.float32)
+        episode_data['language_instruction'] = dataset.meta.episodes[counter]['tasks'][0]
+        
+        # Update counter
+        self.episode_counters[dataset_name] = counter + 1
+        
         return episode_data
+
+    # def _collect_episode(self, lerobot_dataset, episode_idx):
+    #     """Convert a full episode from LeRobotDataset to tensor format."""
+    #     # Get episode boundaries
+    #     from_idx = lerobot_dataset.episode_data_index["from"][episode_idx].item()
+    #     to_idx = lerobot_dataset.episode_data_index["to"][episode_idx].item()
+        
+    #     # Get all frames for this episode
+    #     print(f"from_idx: {from_idx}, to_idx: {to_idx}")
+    #     frames = lerobot_dataset.hf_dataset[from_idx:to_idx]
+        
+    #     # Convert to tensors - frames is now a datasets.Dataset object
+    #     # which already contains all our data in a batch
+    #     episode_data = {}
+
+    #     for key in frames.keys():
+    #         # Stack PyTorch tensors then convert to TF
+    #         stacked = torch.stack(frames[key])
+    #         episode_data[key] = tf.convert_to_tensor(stacked.numpy(), dtype=tf.float32) 
+    #         episode_data['language_instruction'] = lerobot_dataset.meta.episodes[episode_idx]['tasks'][0]
+    #     return episode_data
 
     def _preprocess_episode(self, episode, dataset_name):
         """Convert raw episode to tensor format with all necessary preprocessing."""
@@ -155,7 +213,7 @@ class LeRobotV2Dataset:
         camera_frames = {}
         camera_masks = {}
         camera_keys = [k for k in episode.keys() if k.startswith('observation.images.')]
-        
+
         for idx, camera_key in enumerate(camera_keys):
             frames = tf.convert_to_tensor(episode[camera_key].numpy(), dtype=tf.float32)
             
@@ -227,24 +285,29 @@ class LeRobotV2Dataset:
                 self.dataset_names, 
                 p=self.sample_weights
             )
-            x = next(self.name2dataset[dataset_name])
-            x['json_content'] = {
-                'dataset_name': x['dataset_name'],
-                'instruction': x['language_instruction'],
+            
+            episode_frames = self.get_episode(dataset_name)
+            
+            # Process frames into required format
+            processed = self._preprocess_episode(episode_frames, dataset_name)
+            processed['json_content'] = {
+                'dataset_name': processed['dataset_name'],
+                'instruction': processed['language_instruction'],
             }
+
+            yield processed            
 
 if __name__ == "__main__":
     dataset = LeRobotV2Dataset(0, 'finetune')
-    try:
-        for episode in dataset:
-            print("First step of episode:")
-            # print(episode[0])
-            break
+    i = 0
+    for episode in dataset:
+        print("step in an episode")
+        if i == 0:
             print("\nShape information:")
             # Print shapes of key tensors if available
-            for key, value in episode[0].items():
+            for key, value in episode.items():
                 if hasattr(value, 'shape'):
                     print(f"{key}: {value.shape}")
+        i += 1
+        if i == 10:
             break
-    except Exception as e:
-        print(f"Error during dataset testing: {e}")
