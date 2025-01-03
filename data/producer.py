@@ -13,7 +13,7 @@ import tensorflow as tf
 import yaml
 
 from data.vla_dataset import VLADataset
-from data.filelock import FileLock
+from data.filelock_local import FileLock
 
 
 # Producer does not need GPU
