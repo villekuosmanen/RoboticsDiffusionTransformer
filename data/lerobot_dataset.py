@@ -22,8 +22,6 @@ if ACTION_CHUNK_SIZE < 1:
     raise ValueError("Config `action_chunk_size` must be at least 1.")
 EPSD_LEN_THRESH_LOW = config['dataset']['epsd_len_thresh_low']
 EPSD_LEN_THRESH_HIGH = config['dataset']['epsd_len_thresh_high']
-# print(f"IMG_HISTORY_SIZE: {IMG_HISTORY_SIZE}")
-
 
 class LeRobotV2Dataset:
     """
@@ -68,46 +66,6 @@ class LeRobotV2Dataset:
         # Normalize weights
         self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
         self.sample_weights /= np.sum(self.sample_weights)
-
-        # # Initialize datasets
-        # self.name2dataset = {}
-        # self.sample_weights = []
-        
-        # for dataset_name in self.dataset_names:
-        #     # Load dataset and preprocess all episodes
-        #     lerobot_dataset = LeRobotDataset(dataset_name)
-
-        #     # collect episodes by feature
-        #     collected_features = {}
-        #     first_episode = self._collect_episode(lerobot_dataset, 0)
-        #     first_processed = self._preprocess_episode(first_episode, dataset_name)
-        #     for key in first_processed.keys():
-        #         collected_features[key] = []
-            
-        #     # Pre-process all episodes and convert to the format we need
-        #     for episode_idx in range(lerobot_dataset.num_episodes):
-        #         episode = self._collect_episode(lerobot_dataset, episode_idx)
-                
-        #         processed = self._preprocess_episode(episode, dataset_name)
-        #         for key in processed.keys():
-        #             collected_features[key].append(processed[key])
-
-        #     print("processed_episodes collected")
-            
-        #     # Convert to tensor format
-        #     # Each processed episode should now be a dict of tensors
-        #     dataset = tf.data.Dataset.from_tensor_slices(collected_features)
-        #     print("dataset created")
-
-        #     if repeat:
-        #         dataset = dataset.repeat()
-                
-        #     self.name2dataset[dataset_name] = iter(dataset)
-        #     self.sample_weights.append(sample_weights[dataset_name])
-            
-        # # Normalize weights
-        # self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
-        # self.sample_weights /= np.sum(self.sample_weights)
 
     def sample_episode_frames(self, from_idx, to_idx):
         episode_length = to_idx - from_idx
@@ -187,27 +145,6 @@ class LeRobotV2Dataset:
         self.episode_counters[dataset_name] = counter + 1
         
         return episode_data
-
-    # def _collect_episode(self, lerobot_dataset, episode_idx):
-    #     """Convert a full episode from LeRobotDataset to tensor format."""
-    #     # Get episode boundaries
-    #     from_idx = lerobot_dataset.episode_data_index["from"][episode_idx].item()
-    #     to_idx = lerobot_dataset.episode_data_index["to"][episode_idx].item()
-        
-    #     # Get all frames for this episode
-    #     print(f"from_idx: {from_idx}, to_idx: {to_idx}")
-    #     frames = lerobot_dataset.hf_dataset[from_idx:to_idx]
-        
-    #     # Convert to tensors - frames is now a datasets.Dataset object
-    #     # which already contains all our data in a batch
-    #     episode_data = {}
-
-    #     for key in frames.keys():
-    #         # Stack PyTorch tensors then convert to TF
-    #         stacked = torch.stack(frames[key])
-    #         episode_data[key] = tf.convert_to_tensor(stacked.numpy(), dtype=tf.float32) 
-    #         episode_data['language_instruction'] = lerobot_dataset.meta.episodes[episode_idx]['tasks'][0]
-    #     return episode_data
 
     def _preprocess_episode(self, episode, dataset_name):
         """Convert raw episode to tensor format with all necessary preprocessing."""
