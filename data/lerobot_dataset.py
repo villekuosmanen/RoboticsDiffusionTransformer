@@ -7,6 +7,7 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 import torch
 
+from state_vec import STATE_VEC_IDX_MAPPING, STATE_VEC_LEN
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 # from lerobot_data.tfds_builder import LeRobotV2DatasetTFDSBuilder
 
@@ -22,6 +23,52 @@ if ACTION_CHUNK_SIZE < 1:
     raise ValueError("Config `action_chunk_size` must be at least 1.")
 EPSD_LEN_THRESH_LOW = config['dataset']['epsd_len_thresh_low']
 EPSD_LEN_THRESH_HIGH = config['dataset']['epsd_len_thresh_high']
+
+# Read the image keys of each dataset
+with open('configs/dataset_img_keys.json', 'r') as file:
+    IMAGE_KEYS = json.load(file)
+
+AGILEX_STATE_INDICES = [
+    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
+] + [
+    STATE_VEC_IDX_MAPPING["left_gripper_open"]
+] + [
+    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
+] + [
+    STATE_VEC_IDX_MAPPING[f"right_gripper_open"]
+]
+
+def _format_joint_to_state(joints):
+        """
+        Format the joint proprioception into the unified action vector.
+
+        Args:
+            joints (torch.Tensor): The joint proprioception to be formatted. 
+                qpos ([B, N, 14]).
+
+        Returns:
+            state (torch.Tensor): The formatted vector for RDT ([B, N, 128]). 
+        """
+        # Rescale the gripper to the range of [0, 1]
+        joints = joints * torch.tensor(
+            [[[1, 1, 1, 1, 1, 1, 20, 1, 1, 1, 1, 1, 1, 20]]],
+            device=joints.device, dtype=joints.dtype
+        )
+        
+        B, N, _ = joints.shape
+        state = torch.zeros(
+            (B, N, STATE_VEC_LEN), 
+            device=joints.device, dtype=joints.dtype
+        )
+        # Fill into the unified state vector
+        state[:, :, AGILEX_STATE_INDICES] = joints
+        # Assemble the mask indicating each dimension's availability 
+        state_elem_mask = torch.zeros(
+            (B, STATE_VEC_LEN),
+            device=joints.device, dtype=joints.dtype
+        )
+        state_elem_mask[:, AGILEX_STATE_INDICES] = 1
+        return state, state_elem_mask
 
 class LeRobotV2Dataset:
     """
@@ -136,9 +183,9 @@ class LeRobotV2Dataset:
         for key in frames.keys():
             if key not in camera_keys:  # Skip camera keys as we handle them separately
                 stacked = torch.stack(frames[key])
-                episode_data[key] = tf.convert_to_tensor(stacked.numpy(), dtype=tf.float32)
+                episode_data[key] = stacked
         for camera_key in camera_keys:
-            episode_data[camera_key] = tf.convert_to_tensor(video_frames[camera_key].numpy(), dtype=tf.float32)
+            episode_data[camera_key] = video_frames[camera_key]
         episode_data['language_instruction'] = dataset.meta.episodes[counter]['tasks'][0]
         
         # Update counter
@@ -149,9 +196,13 @@ class LeRobotV2Dataset:
     def _preprocess_episode(self, episode, dataset_name):
         """Convert raw episode to tensor format with all necessary preprocessing."""
 
+        states_raw, state_masks_raw = _format_joint_to_state(episode['observation.state'])
+        actions_raw, actions_mask = _format_joint_to_state(episode['action'])
+
         # Get all states and actions from episode
-        states = tf.convert_to_tensor(episode['observation.state'].numpy(), dtype=tf.float32)
-        actions = tf.convert_to_tensor(episode['action'].numpy(), dtype=tf.float32)
+        states = tf.convert_to_tensor(states_raw.numpy(), dtype=tf.float32)
+        state_masks = tf.convert_to_tensor(state_masks_raw.numpy(), dtype=tf.float32)
+        actions = tf.convert_to_tensor(actions_raw.numpy(), dtype=tf.float32)
 
         # Handle state history (past states window)
         first_state = tf.expand_dims(states[0], axis=0)
@@ -188,11 +239,19 @@ class LeRobotV2Dataset:
         # Handle camera frames
         camera_frames = {}
         camera_masks = {}
-        camera_keys = [k for k in episode.keys() if k.startswith('observation.images.')]
 
-        for idx, camera_key in enumerate(camera_keys):
-            frames = tf.convert_to_tensor(episode[camera_key].numpy(), dtype=tf.float32)
-            
+        image_meta_for_dataset = IMAGE_KEYS[dataset_name]
+        for idx in range(4):
+            image_key = image_meta_for_dataset['image_keys'][idx]
+            image_mask = image_meta_for_dataset['image_mask'][idx]
+            if image_mask == 1:
+                frames = tf.convert_to_tensor(episode[image_key].numpy(), dtype=tf.float32)
+            else:
+                frames = tf.TensorArray(dtype=tf.float32, size=tf.shape(states)[0] - 1, dynamic_size=True)
+                frames = frames.write(
+                    tf.shape(states)[0] - 1,
+                    tf.zeros([0, 0, 0], dtype=tf.float32),
+                ).stack()
             # Create frame history window
             first_frame = tf.expand_dims(frames[0], axis=0)
             first_frame = tf.repeat(first_frame, IMG_HISTORY_SIZE-1, axis=0)
@@ -223,7 +282,6 @@ class LeRobotV2Dataset:
             camera_masks[f'past_frames_{idx}_time_mask'] = past_frames_time_mask
 
         num_steps = tf.shape(states)[0]
-        print(f"num_steps: {num_steps}")
 
         # Get the dataset name and instruction
         instruction = episode.get('language_instruction', None)
@@ -240,7 +298,7 @@ class LeRobotV2Dataset:
             'language_instruction': tf.constant(instruction, dtype=tf.string),
             'state_chunk': past_states,
             'action_chunk': future_actions,
-            'state_vec_mask': tf.ones_like(states, dtype=tf.bool),
+            'state_vec_mask': state_masks,
             'state_std': state_std,
             'state_mean': state_mean,
             'state_norm': state_norm
@@ -287,6 +345,8 @@ if __name__ == "__main__":
             for key, value in episode.items():
                 if hasattr(value, 'shape'):
                     print(f"{key}: {value.shape}")
+                else:
+                    print(value)
         del(episode)
         i += 1
         if i == 10:

@@ -571,5 +571,122 @@
             "images0"
         ],
         "image_mask":[1,0,0,0]
+    },
+    "villekuosmanen/pass_laser_pointer": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/move_glass_cups": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/rice-cooker_step_0": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
+    "villekuosmanen/rice-cooker_step_1_truncated_x": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
+    "villekuosmanen/rice-cooker_step_2": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
+    "villekuosmanen/rice-cooker_step_3": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
+    "villekuosmanen/pick_coffee_capsule_merged": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
+    "villekuosmanen/pick_coffee_prop_center_merged": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
+    "villekuosmanen/pack_shoes": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/close_shoebox": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/pick_up_lid": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/fold_hand_towel": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/lift_cup_remove_capsule_": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
     }
 }
