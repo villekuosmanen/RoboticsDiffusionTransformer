@@ -32,6 +32,12 @@ AGILEX_STATE_INDICES = [
     STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
 ] + [
     STATE_VEC_IDX_MAPPING["left_gripper_open"]
+]
+
+AGILEX_STATE_INDICES_BIMANUAL = [
+    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
+] + [
+    STATE_VEC_IDX_MAPPING["left_gripper_open"]
 ] + [
     STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
 ] + [
@@ -50,24 +56,34 @@ def _format_joint_to_state(joints):
             state (torch.Tensor): The formatted vector for RDT ([B, N, 128]). 
         """
         # Rescale the gripper to the range of [0, 1]
-        joints = joints * torch.tensor(
-            [[[1, 1, 1, 1, 1, 1, 20, 1, 1, 1, 1, 1, 1, 20]]],
-            device=joints.device, dtype=joints.dtype
-        )
+        if len(joints[0]) == 7:
+            joints = joints * torch.tensor(
+                [[1, 1, 1, 1, 1, 1, 20]],
+                device=joints.device, dtype=joints.dtype
+            )
+            state_indices = AGILEX_STATE_INDICES
+        elif len(joints[0]) == 14:
+            joints = joints * torch.tensor(
+                [[1, 1, 1, 1, 1, 1, 20, 1, 1, 1, 1, 1, 1, 20]],
+                device=joints.device, dtype=joints.dtype
+            )
+            state_indices = AGILEX_STATE_INDICES_BIMANUAL
+        else:
+            raise ValueError(f"does not support datasets with joints of size {len(joints[0][0])}")
         
-        B, N, _ = joints.shape
+        B, _ = joints.shape
         state = torch.zeros(
-            (B, N, STATE_VEC_LEN), 
+            (B, STATE_VEC_LEN), 
             device=joints.device, dtype=joints.dtype
         )
         # Fill into the unified state vector
-        state[:, :, AGILEX_STATE_INDICES] = joints
+        state[:, state_indices] = joints
         # Assemble the mask indicating each dimension's availability 
         state_elem_mask = torch.zeros(
             (B, STATE_VEC_LEN),
             device=joints.device, dtype=joints.dtype
         )
-        state_elem_mask[:, AGILEX_STATE_INDICES] = 1
+        state_elem_mask[:, state_indices] = 1
         return state, state_elem_mask
 
 class LeRobotV2Dataset:
@@ -196,6 +212,8 @@ class LeRobotV2Dataset:
     def _preprocess_episode(self, episode, dataset_name):
         """Convert raw episode to tensor format with all necessary preprocessing."""
 
+        print(f"shape of states: {episode['observation.state'].shape}")
+        print(f"shape of actions: {episode['action'].shape}")
         states_raw, state_masks_raw = _format_joint_to_state(episode['observation.state'])
         actions_raw, actions_mask = _format_joint_to_state(episode['action'])
 
@@ -291,26 +309,51 @@ class LeRobotV2Dataset:
         else:
             instruction = ''
 
-        # Convert these to tensors that can be sliced
-        steps_data = {
-            'step_id': tf.range(num_steps),
-            'dataset_name': tf.constant(dataset_name, dtype=tf.string),
-            'language_instruction': tf.constant(instruction, dtype=tf.string),
-            'state_chunk': past_states,
-            'action_chunk': future_actions,
-            'state_vec_mask': state_masks,
-            'state_std': state_std,
-            'state_mean': state_mean,
-            'state_norm': state_norm
-        }
+        steps = []
+        for i in range(num_steps):
+            step_dict = {
+                'step_id': tf.constant(i, dtype=tf.uint8),
+                'state_chunk': past_states[i],
+                'action_chunk': future_actions[i],
+                'state_vec_mask': state_masks[i],
+                'state_std': state_std[i],
+                'state_mean': state_mean[i],
+                'state_norm': state_norm[i],
+                'json_content': {
+                    'dataset_name': dataset_name,
+                    'instruction': instruction,
+                },
+            }
+            
+            # Add camera frames and masks for this timestep
+            for cam_key in camera_frames:
+                step_dict[cam_key] = camera_frames[cam_key][i]
+                mask_key = f"{cam_key}_time_mask"
+                step_dict[mask_key] = camera_masks[mask_key][i]
+            
+            steps.append(step_dict)
+
+        return steps
+
+        # steps_data = {
+        #     'step_id': tf.range(num_steps),
+        #     'dataset_name': tf.constant(dataset_name, dtype=tf.string),
+        #     'language_instruction': tf.constant(instruction, dtype=tf.string),
+        #     'state_chunk': past_states,
+        #     'action_chunk': future_actions,
+        #     'state_vec_mask': state_masks,
+        #     'state_std': state_std,
+        #     'state_mean': state_mean,
+        #     'state_norm': state_norm
+        # }
         
-        # Add camera frames and masks
-        for cam_key in camera_frames:
-            steps_data[cam_key] = camera_frames[cam_key]
-            mask_key = f"{cam_key}_time_mask"
-            steps_data[mask_key] = camera_masks[mask_key]
+        # # Add camera frames and masks
+        # for cam_key in camera_frames:
+        #     steps_data[cam_key] = camera_frames[cam_key]
+        #     mask_key = f"{cam_key}_time_mask"
+        #     steps_data[mask_key] = camera_masks[mask_key]
         
-        return steps_data
+        # return steps_data
     
     def __iter__(self):
         """Iterate over episodes."""
@@ -320,19 +363,11 @@ class LeRobotV2Dataset:
                 p=self.sample_weights
             )
             
-            episode_frames = self.get_episode(dataset_name)
-            if episode_frames == None:
+            episode = self.get_episode(dataset_name)
+            if episode == None:
                 continue
-            
-            # Process frames into required format
-            processed = self._preprocess_episode(episode_frames, dataset_name)
-            processed['json_content'] = {
-                'dataset_name': processed['dataset_name'],
-                'instruction': processed['language_instruction'],
-            }
-            del(episode_frames)
 
-            yield processed            
+            yield self._preprocess_episode(episode, dataset_name)            
 
 if __name__ == "__main__":
     dataset = LeRobotV2Dataset(0, 'finetune')
@@ -340,9 +375,9 @@ if __name__ == "__main__":
     for episode in dataset:
         print("step in an episode")
         if i == 0:
-            print("\nShape information:")
+            print(f"Shape information (len={len(episode)}):")
             # Print shapes of key tensors if available
-            for key, value in episode.items():
+            for key, value in episode[0].items():
                 if hasattr(value, 'shape'):
                     print(f"{key}: {value.shape}")
                 else:
