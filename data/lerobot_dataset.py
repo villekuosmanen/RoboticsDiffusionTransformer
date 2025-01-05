@@ -1,4 +1,5 @@
 import json
+import random
 import yaml
 
 import numpy as np
@@ -19,7 +20,9 @@ if IMG_HISTORY_SIZE < 1:
 ACTION_CHUNK_SIZE = config['common']['action_chunk_size']
 if ACTION_CHUNK_SIZE < 1:
     raise ValueError("Config `action_chunk_size` must be at least 1.")
-print(f"IMG_HISTORY_SIZE: {IMG_HISTORY_SIZE}")
+EPSD_LEN_THRESH_LOW = config['dataset']['epsd_len_thresh_low']
+EPSD_LEN_THRESH_HIGH = config['dataset']['epsd_len_thresh_high']
+# print(f"IMG_HISTORY_SIZE: {IMG_HISTORY_SIZE}")
 
 
 class LeRobotV2Dataset:
@@ -37,6 +40,7 @@ class LeRobotV2Dataset:
         """
         # Prevent TF from using GPU - the producer will load data in RAM only
         tf.config.set_visible_devices([], 'GPU')
+        self.max_steps = EPSD_LEN_THRESH_HIGH
 
         # Load dataset names and weights from config
         dataset_names_cfg = f'configs/{dataset_type}_datasets.json'
@@ -105,6 +109,36 @@ class LeRobotV2Dataset:
         # self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
         # self.sample_weights /= np.sum(self.sample_weights)
 
+    def sample_episode_frames(self, from_idx, to_idx):
+        episode_length = to_idx - from_idx
+        
+        if episode_length <= self.max_steps:
+            # If episode is shorter than max_steps, return full episode
+            return (from_idx, to_idx)
+        
+        # First determine if a centered window is possible at the chosen point
+        def get_valid_window(center_idx):
+            half_window = self.max_steps // 2
+            start = center_idx - half_window
+            end = start + self.max_steps  # Use full window length to handle odd max_steps
+            
+            # If window would go beyond bounds, adjust it
+            if start < from_idx:
+                # If too close to start, anchor at start
+                return (from_idx, from_idx + self.max_steps)
+            elif end > to_idx:
+                # If too close to end, anchor at end
+                return (to_idx - self.max_steps, to_idx)
+            else:
+                # Center window is valid
+                return (start, end)
+        
+        # Pick a random center point across full range
+        center_idx = random.randint(from_idx, to_idx)
+        window = get_valid_window(center_idx)
+        
+        return window
+
     def get_episode(self, dataset_name):
         """Get next episode from a dataset."""
         dataset = self.datasets[dataset_name]
@@ -119,6 +153,11 @@ class LeRobotV2Dataset:
         # Get episode boundaries
         from_idx = dataset.episode_data_index["from"][counter].item()
         to_idx = dataset.episode_data_index["to"][counter].item()
+        if to_idx - from_idx < EPSD_LEN_THRESH_LOW:
+            # return nothing if too small of an episode
+            self.episode_counters[dataset_name] = counter + 1
+            return None
+        (from_idx, to_idx) = self.sample_episode_frames(from_idx, to_idx)
         
         # Get episode frames from parquet
         print(f"from_idx: {from_idx}, to_idx: {to_idx}")
@@ -287,6 +326,8 @@ class LeRobotV2Dataset:
             )
             
             episode_frames = self.get_episode(dataset_name)
+            if episode_frames == None:
+                continue
             
             # Process frames into required format
             processed = self._preprocess_episode(episode_frames, dataset_name)
@@ -294,6 +335,7 @@ class LeRobotV2Dataset:
                 'dataset_name': processed['dataset_name'],
                 'instruction': processed['language_instruction'],
             }
+            del(episode_frames)
 
             yield processed            
 
@@ -308,6 +350,7 @@ if __name__ == "__main__":
             for key, value in episode.items():
                 if hasattr(value, 'shape'):
                     print(f"{key}: {value.shape}")
+        del(episode)
         i += 1
         if i == 10:
             break
