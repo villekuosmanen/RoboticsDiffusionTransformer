@@ -1,4 +1,6 @@
+import gc
 import json
+import tracemalloc
 import yaml
 
 import numpy as np
@@ -21,6 +23,7 @@ if ACTION_CHUNK_SIZE < 1:
     raise ValueError("Config `action_chunk_size` must be at least 1.")
 print(f"IMG_HISTORY_SIZE: {IMG_HISTORY_SIZE}")
 
+DATA_LOADER_BATCH_SIZE = 8
 
 class LeRobotV2Dataset:
     """
@@ -55,6 +58,9 @@ class LeRobotV2Dataset:
         self.episode_counters = {}
         self.repeat = repeat
         self.sample_weights = []
+
+        # for caching episodes used together with a data loader
+        self.batch_size = 1
 
         for dataset_name in self.dataset_names:
             self.datasets[dataset_name] = LeRobotDataset(dataset_name)
@@ -105,47 +111,150 @@ class LeRobotV2Dataset:
         # self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
         # self.sample_weights /= np.sum(self.sample_weights)
 
-    def get_episode(self, dataset_name):
-        """Get next episode from a dataset."""
+    # def get_episode(self, dataset_name):
+    #     """Get next episode from a dataset."""
+    #     dataset = self.datasets[dataset_name]
+    #     counter = self.episode_counters[dataset_name]
+        
+    #     # Reset counter if needed
+    #     if counter >= dataset.num_episodes:
+    #         if not self.repeat:
+    #             raise StopIteration
+    #         counter = 0
+            
+    #     # Get episode boundaries
+    #     from_idx = dataset.episode_data_index["from"][counter].item()
+    #     to_idx = dataset.episode_data_index["to"][counter].item()
+        
+    #     # Get episode frames from parquet
+    #     print(f"from_idx: {from_idx}, to_idx: {to_idx}")
+    #     frames = dataset.hf_dataset[from_idx:to_idx]
+    #     # print(dataset.features)
+    #     # print(dataset.hf_features)
+
+    #     # Get video data for each camera
+    #     camera_keys = [k for k in dataset.features.keys() if k.startswith('observation.images.')]
+    #     timestamps = [frame.item() for frame in frames["timestamp"]]     
+    #     query_timestamps = {
+    #         camera_key: timestamps for camera_key in camera_keys
+    #     }
+    #     video_frames = dataset._query_videos(query_timestamps, counter)
+        
+    #     # Create episode data combining parquet and video data
+    #     episode_data = {}
+    #     for key in frames.keys():
+    #         if key not in camera_keys:  # Skip camera keys as we handle them separately
+    #             stacked = torch.stack(frames[key])
+    #             episode_data[key] = tf.convert_to_tensor(stacked.numpy(), dtype=tf.float32)
+    #     for camera_key in camera_keys:
+    #         episode_data[camera_key] = tf.convert_to_tensor(video_frames[camera_key].numpy(), dtype=tf.float32)
+    #     episode_data['language_instruction'] = dataset.meta.episodes[counter]['tasks'][0]
+        
+    #     # Update counter
+    #     self.episode_counters[dataset_name] = counter + 1
+        
+    #     return episode_data
+
+    def load_episode_batch(self, dataset_name):
+        """Load multiple episodes using DataLoader."""
         dataset = self.datasets[dataset_name]
         counter = self.episode_counters[dataset_name]
         
-        # Reset counter if needed
-        if counter >= dataset.num_episodes:
-            if not self.repeat:
-                raise StopIteration
-            counter = 0
-            
-        # Get episode boundaries
-        from_idx = dataset.episode_data_index["from"][counter].item()
-        to_idx = dataset.episode_data_index["to"][counter].item()
-        
-        # Get episode frames from parquet
-        print(f"from_idx: {from_idx}, to_idx: {to_idx}")
-        frames = dataset.hf_dataset[from_idx:to_idx]
-        # print(dataset.features)
-        # print(dataset.hf_features)
+        # Create indices for frames in these episodes
+        frame_indices = []
+        episode_starts = []
+        for _ in range(self.batch_size):
+            if counter >= dataset.num_episodes:
+                if not self.repeat:
+                    break
+                counter = 0
+                
+            # Get frame indices for this episode
+            from_idx = dataset.episode_data_index["from"][counter].item()
+            to_idx = dataset.episode_data_index["to"][counter].item()
+            episode_starts.append(counter)  # Save episode index
+            frame_indices.extend(range(from_idx, to_idx))
+            counter += 1
 
-        # Get video data for each camera
-        camera_keys = [k for k in dataset.features.keys() if k.startswith('observation.images.')]
-        timestamps = [frame.item() for frame in frames["timestamp"]]     
-        query_timestamps = {
-            camera_key: timestamps for camera_key in camera_keys
-        }
-        video_frames = dataset._query_videos(query_timestamps, counter)
+
+        # Create DataLoader directly from LeRobotDataset
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=DATA_LOADER_BATCH_SIZE,  # Or whatever batch size makes sense
+            num_workers=32,
+            pin_memory=True,
+            sampler=frame_indices  # Use our frame indices
+        )
         
-        # Create episode data combining parquet and video data
+        # Process batches into episodes
+        current_episode = []
+        current_episode_idx = episode_starts[0]  # Start with first episode
+        
+        total_frames = 0
+        for batch in loader:
+            total_frames += len(batch['frame_index'])
+            print(f"expected: {len(frame_indices)}, currently at {total_frames}")
+            for idx in range(len(batch['episode_index'])):
+                episode_idx = batch['episode_index'][idx].item()
+                
+                # If we've moved to a new episode
+                if episode_idx != current_episode_idx:
+                    # Save completed episode
+                    if current_episode:
+                        print("yield")
+                        yield self._combine_episode_frames(current_episode)
+                    del(current_episode)
+                    current_episode = []
+                    current_episode_idx = episode_idx
+
+                    gc.collect()
+                    print("garbage collected")
+                    snapshot = tracemalloc.take_snapshot()
+                    top_stats = snapshot.statistics('lineno')
+                    print("[ Top 10 memory users ]")
+                    for stat in top_stats[:10]:
+                        print(stat)
+                
+                # Extract single frame from batch and add to current episode
+                frame = {k: v[idx:idx+1] for k, v in batch.items()}
+                current_episode.append(frame)
+        
+        # Don't forget to add the last episode
+        if current_episode:
+            yield self._combine_episode_frames(current_episode)
+        
+        # Update counter and cache
+        self.episode_counters[dataset_name] = counter
+
+
+    def _combine_episode_frames(self, batches):
+        """Combine frame batches into a single episode dict with tensors.
+        
+        Args:
+            batches: List of frame batches from DataLoader, where each batch is a dict of tensors
+            
+        Returns:
+            Dict containing episode data with concatenated tensors
+        """
+        if not batches:
+            return None
+            
+        # Initialize dict to store combined episode data
         episode_data = {}
-        for key in frames.keys():
-            if key not in camera_keys:  # Skip camera keys as we handle them separately
-                stacked = torch.stack(frames[key])
-                episode_data[key] = tf.convert_to_tensor(stacked.numpy(), dtype=tf.float32)
-        for camera_key in camera_keys:
-            episode_data[camera_key] = tf.convert_to_tensor(video_frames[camera_key].numpy(), dtype=tf.float32)
-        episode_data['language_instruction'] = dataset.meta.episodes[counter]['tasks'][0]
         
-        # Update counter
-        self.episode_counters[dataset_name] = counter + 1
+        # Get all keys from first batch
+        keys = batches[0].keys()
+        
+        # Combine each key's tensors
+        for key in keys:
+            tensors = [batch[key] for batch in batches]
+            if isinstance(tensors[0], torch.Tensor):
+                # Concatenate along batch dimension (0)
+                episode_data[key] = torch.cat(tensors, dim=0)
+            else:
+                # For non-tensor data (like strings), just take first value
+                # This works for things like language_instruction which should be same for whole episode
+                episode_data[key] = tensors[0]
         
         return episode_data
 
@@ -286,22 +395,28 @@ class LeRobotV2Dataset:
                 p=self.sample_weights
             )
             
-            episode_frames = self.get_episode(dataset_name)
-            
-            # Process frames into required format
-            processed = self._preprocess_episode(episode_frames, dataset_name)
-            processed['json_content'] = {
-                'dataset_name': processed['dataset_name'],
-                'instruction': processed['language_instruction'],
-            }
-
-            yield processed            
+            try:
+                # Get episodes from batch generator
+                for episode in self.load_episode_batch(dataset_name):
+                    processed = self._preprocess_episode(episode, dataset_name)
+                    processed['json_content'] = {
+                        'dataset_name': processed['dataset_name'],
+                        'instruction': processed['language_instruction'],
+                    }
+                    del(episode)  # clean up
+                    yield processed
+                    del(processed)
+            except StopIteration:
+                # If this dataset is done and not repeating, try another
+                continue
 
 if __name__ == "__main__":
+    tracemalloc.start()
     dataset = LeRobotV2Dataset(0, 'finetune')
     i = 0
     for episode in dataset:
         print("step in an episode")
+
         if i == 0:
             print("\nShape information:")
             # Print shapes of key tensors if available
@@ -309,5 +424,15 @@ if __name__ == "__main__":
                 if hasattr(value, 'shape'):
                     print(f"{key}: {value.shape}")
         i += 1
+
+        del(episode)
+        gc.collect()
+        print("garbage collected")
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics('lineno')
+        print("[ Top 10 memory users ]")
+        for stat in top_stats[:10]:
+            print(stat)
+
         if i == 10:
             break
