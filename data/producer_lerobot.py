@@ -7,10 +7,12 @@ import sys
 import signal
 import random
 from multiprocessing import Process
+import yaml
+
+import cv2
 
 import numpy as np
 import tensorflow as tf
-import yaml
 
 from lerobot_dataset import LeRobotV2Dataset
 from filelock_local import FileLock
@@ -97,6 +99,18 @@ def read_dirty_bit(chunk_dir):
     # If failed to read the dirty bit, return all ones for robustness
     return np.ones(BUF_CHUNK_SIZE, dtype=np.uint8)
 
+def debug_vis(img, name):
+    image = img.numpy()  # Convert tensor to numpy if needed
+    image = np.transpose(image, (1, 2, 0))  # Reorder to (H,W,C)
+
+    # If values are in [0,1] range, scale to [0,255]
+    if image.max() <= 1.0:
+        image = (image * 255).astype(np.uint8)
+
+    # Option 1: Display with OpenCV
+    cv2.imshow(name, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))  # OpenCV uses BGR
+    cv2.waitKey(0)
+
 
 def save_sample(step_dict, chunk_dir, chunk_item_idx):
     """
@@ -105,6 +119,13 @@ def save_sample(step_dict, chunk_dir, chunk_item_idx):
     # Save the json content
     # time_stmp = time.time()
     # while time.time() - time_stmp < 10.0:
+
+    # if step_dict['step_id'].numpy() > 10:
+    #     debug_vis(step_dict['past_frames_0'][0], "Front camera - past frame")
+    #     debug_vis(step_dict['past_frames_0'][1], "Front camera - current frame")
+    #     debug_vis(step_dict['past_frames_1'][0], "Wrist camera - past frame")
+    #     debug_vis(step_dict['past_frames_1'][1], "Wrist camera - current frame")
+
     locks = []
     json_content = step_dict['json_content']
     file_path = os.path.join(chunk_dir, f"json_content_{chunk_item_idx}.json")
@@ -241,6 +262,7 @@ def run_producer(seed, num_workers, worker_id, fill_up, clean_dirty, dataset_typ
                     dirty_bit = np.zeros(BUF_CHUNK_SIZE, dtype=np.uint8)
                     save_dirty_bit(dirty_chunk_dir, dirty_bit)
                     print(f"Worker {worker_id}: Replaced dirty chunk {dirty_chunk_idx}.")
+        print("episode saved")
 
 
 if __name__ == '__main__':

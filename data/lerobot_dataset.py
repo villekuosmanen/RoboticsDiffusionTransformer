@@ -334,26 +334,6 @@ class LeRobotV2Dataset:
             steps.append(step_dict)
 
         return steps
-
-        # steps_data = {
-        #     'step_id': tf.range(num_steps),
-        #     'dataset_name': tf.constant(dataset_name, dtype=tf.string),
-        #     'language_instruction': tf.constant(instruction, dtype=tf.string),
-        #     'state_chunk': past_states,
-        #     'action_chunk': future_actions,
-        #     'state_vec_mask': state_masks,
-        #     'state_std': state_std,
-        #     'state_mean': state_mean,
-        #     'state_norm': state_norm
-        # }
-        
-        # # Add camera frames and masks
-        # for cam_key in camera_frames:
-        #     steps_data[cam_key] = camera_frames[cam_key]
-        #     mask_key = f"{cam_key}_time_mask"
-        #     steps_data[mask_key] = camera_masks[mask_key]
-        
-        # return steps_data
     
     def __iter__(self):
         """Iterate over episodes."""

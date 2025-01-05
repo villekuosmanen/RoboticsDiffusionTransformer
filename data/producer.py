@@ -7,10 +7,10 @@ import sys
 import signal
 import random
 from multiprocessing import Process
+import yaml
 
 import numpy as np
 import tensorflow as tf
-import yaml
 
 from data.vla_dataset import VLADataset
 from data.filelock_local import FileLock
