@@ -12,9 +12,10 @@ import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
 
-from data.vla_dataset import VLADataset
-from data.hdf5_vla_dataset import HDF5VLADataset
-from data.preprocess import generate_json_state
+# from data.vla_dataset import VLADataset
+from lerobot_dataset import LeRobotV2Dataset
+# from data.hdf5_vla_dataset import HDF5VLADataset
+# from preprocess import generate_json_state
 
 
 # Process each dataset to get the statistics
@@ -51,6 +52,72 @@ def process_dataset(name_dataset_pair):
         states = res_tup[1]
         
         # Convert to numpy
+        states = states.numpy()
+        
+        # Zero the values that are close to zero
+        z_states = states.copy()
+        z_states[np.abs(states) <= EPS] = 0
+        # Compute the non-zero count
+        if nz_state_cnt is None:
+            nz_state_cnt = np.zeros(states.shape[1])
+        nz_state_cnt += np.sum(np.abs(states) > EPS, axis=0)
+        
+        # Update statistics
+        state_sum += np.sum(states, axis=0)
+        state_sum_sq += np.sum(states**2, axis=0)
+        z_state_sum += np.sum(z_states, axis=0)
+        z_state_sum_sq += np.sum(z_states**2, axis=0)
+        state_cnt += states.shape[0]
+        if state_max is None:
+            state_max = np.max(states, axis=0)
+            state_min = np.min(states, axis=0)
+        else:
+            state_max = np.maximum(state_max, np.max(states, axis=0))
+            state_min = np.minimum(state_min, np.min(states, axis=0))
+    
+    # Add one to avoid division by zero
+    nz_state_cnt = np.maximum(nz_state_cnt, np.ones_like(nz_state_cnt))
+    
+    result = {
+        "dataset_name": name_dataset_pair[0],
+        "state_mean": (state_sum / state_cnt).tolist(),
+        "state_std": np.sqrt(
+            np.maximum(
+                (z_state_sum_sq / nz_state_cnt) - (z_state_sum / state_cnt)**2 * (state_cnt / nz_state_cnt),
+                np.zeros_like(state_sum_sq)
+            )
+        ).tolist(),
+        "state_min": state_min.tolist(),
+        "state_max": state_max.tolist(),
+    }
+
+    return result
+
+
+@tf.autograph.experimental.do_not_convert
+def process_lerobot_dataset(dataset_name, lerobot_dataset):
+    MAX_EPISODES = 100000
+    EPS = 1e-8
+    # For debugging
+    # MAX_EPISODES = 10
+    episode_cnt = 0
+    state_sum = 0
+    state_sum_sq = 0
+    z_state_sum = 0
+    z_state_sum_sq = 0
+    state_cnt = 0
+    nz_state_cnt = None
+    state_max = None
+    state_min = None
+
+    preprocessed_states = lerobot_dataset.get_preprocessed_states(dataset_name)
+    for states in preprocessed_states:
+        episode_cnt += 1
+        if episode_cnt % 100 == 0:
+            print(f"Processing episodes {episode_cnt}/{MAX_EPISODES}")
+        if episode_cnt > MAX_EPISODES:
+            break
+
         states = states.numpy()
         
         # Zero the values that are close to zero
@@ -165,6 +232,8 @@ if __name__ == "__main__":
                         help="Whether to skip the existing dataset statistics.")
     parser.add_argument('--hdf5_dataset', action='store_true',
                         help="Whether to load the dataset from the HDF5 files.")
+    parser.add_argument('--lerobot_dataset', action='store_true',
+                        help="Whether to load the dataset from the HDF5 files.")
     args = parser.parse_args()
     
     if args.hdf5_dataset:
@@ -186,10 +255,14 @@ if __name__ == "__main__":
                 json.dump(results, f, indent=4)
         print("All datasets have been processed.")
         os._exit(0)
-        
-    vla_dataset = VLADataset(
-        seed=0, dataset_type=args.dataset_type, repeat=False)
-    name_dataset_pairs = vla_dataset.name2dataset.items()
+    
+    if args.lerobot_dataset:
+        lerobot_dataset = LeRobotV2Dataset(seed=0, dataset_type=args.dataset_type, repeat=False)
+        name_dataset_pairs = lerobot_dataset.datasets.items()
+    else:
+        vla_dataset = VLADataset(
+            seed=0, dataset_type=args.dataset_type, repeat=False)
+        name_dataset_pairs = vla_dataset.name2dataset.items()
     # num_workers = args.n_workers
     
     for name_dataset_pair in tqdm(name_dataset_pairs):
@@ -203,8 +276,11 @@ if __name__ == "__main__":
             print(f"Skipping existed {name_dataset_pair[0]} dataset statistics")
             continue
         print(f"Processing {name_dataset_pair[0]} dataset")
-            
-        result = process_dataset(name_dataset_pair)
+
+        if args.lerobot_dataset:
+            result = process_lerobot_dataset(name_dataset_pair[0], lerobot_dataset)
+        else:
+            result = process_dataset(name_dataset_pair)
                 
         results[result["dataset_name"]] = result
     

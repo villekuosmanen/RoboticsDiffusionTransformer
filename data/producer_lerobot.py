@@ -145,9 +145,9 @@ def save_sample(step_dict, chunk_dir, chunk_item_idx):
             file,
             step_id=step_dict['step_id'].numpy(),
             state_chunk=step_dict['state_chunk'].numpy(),
-            # state_chunk_time_mask=step_dict['state_chunk_time_mask'].numpy(),
+            state_chunk_time_mask=np.array([]),
             action_chunk=step_dict['action_chunk'].numpy(),
-            # action_chunk_time_mask=step_dict['action_chunk_time_mask'].numpy(),
+            action_chunk_time_mask=np.array([]),
             state_vec_mask=step_dict['state_vec_mask'].numpy(),
             past_frames_0=step_dict['past_frames_0'].numpy(),
             past_frames_0_time_mask=step_dict['past_frames_0_time_mask'].numpy(),
@@ -160,9 +160,6 @@ def save_sample(step_dict, chunk_dir, chunk_item_idx):
             state_std=step_dict['state_std'].numpy(),
             state_mean=step_dict['state_mean'].numpy(),
             state_norm=step_dict['state_norm'].numpy(),
-            # pre-computed language embeddings
-            embed=step_dict['embed'].float().numpy(),
-            attn_mask=step_dict['attn_mask'].float().numpy(),            
         )
     lock.release_lock()
     return

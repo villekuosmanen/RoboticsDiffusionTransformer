@@ -167,13 +167,20 @@ class RDTRunner(
                     ) -> torch.Tensor:
         '''
         lang_tokens: (batch_size, lang_len, lang_token_dim)
+            torch.Size([4, 13, 4096])
         lang_attn_mask: (batch_size, lang_len), a mask for valid language tokens,
             which should be True-False bool tensor.
+            torch.Size([4, 13])
         img_tokens: (batch_size, img_len, img_token_dim)
+            torch.Size([4, 4374, 1152])
         state_tokens: (batch_size, 1, state_token_dim)
+            torch.Size([4, 1, 128])
         action_gt: (batch_size, horizon, state_token_dim), ground-truth actions for supervision
+            torch.Size([4, 64, 128])
         action_mask: (batch_size, 1, state_token_dim), a 0-1 **float** tensor.
+            torch.Size([4, 1, 128])
         ctrl_freqs: (batch_size,), control frequency for each sample.
+            Size([4])
         
         return: loss_value, a scalar tensor
         '''

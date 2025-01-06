@@ -61,5 +61,18 @@
     "agilex": 25,
     "rh20t": 10,
     "calvin": 30,
-    "bridgev2": 5
+    "bridgev2": 5,
+    "villekuosmanen/pass_laser_pointer": 50,
+    "villekuosmanen/move_glass_cups": 50,
+    "villekuosmanen/rice-cooker_step_0": 50,
+    "villekuosmanen/rice-cooker_step_1_truncated_x": 50,
+    "villekuosmanen/rice-cooker_step_2": 50,
+    "villekuosmanen/rice-cooker_step_3": 50,
+    "villekuosmanen/pick_coffee_capsule_merged": 50,
+    "villekuosmanen/pick_coffee_prop_center_merged": 50,
+    "villekuosmanen/pack_shoes": 50,
+    "villekuosmanen/close_shoebox": 50,
+    "villekuosmanen/pick_up_lid": 50,
+    "villekuosmanen/fold_hand_towel": 50,
+    "villekuosmanen/lift_cup_remove_capsule_": 50
 }

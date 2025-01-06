@@ -209,8 +209,31 @@ class LeRobotV2Dataset:
         self.episode_counters[dataset_name] = counter + 1
         
         return episode_data
+    
+    def get_preprocessed_states(self, dataset_name):
+        dataset = self.datasets[dataset_name]
+        preprocessed_states = []
+        for i in range(dataset.num_episodes):
+            from_idx = dataset.episode_data_index["from"][i].item()
+            to_idx = dataset.episode_data_index["to"][i].item()
+            
+            episode_data = {}
+            try:
+                frames = dataset.hf_dataset[from_idx:to_idx]
+            except IndexError:
+                # in case of incorrectly cleaned data
+                continue
+            for key in frames.keys():
+                stacked = torch.stack(frames[key])
+                episode_data[key] = stacked
+            
+            # pre-process
+            states_raw, _ = _format_joint_to_state(episode_data['observation.state'])
+            preprocessed_states.append(tf.convert_to_tensor(states_raw.numpy(), dtype=tf.float32))
 
-    def _preprocess_episode(self, episode, dataset_name):
+        return preprocessed_states
+
+    def preprocess_episode(self, episode, dataset_name):
         """Convert raw episode to tensor format with all necessary preprocessing."""
         states_raw, state_masks_raw = _format_joint_to_state(episode['observation.state'])
         actions_raw, actions_mask = _format_joint_to_state(episode['action'])
@@ -306,8 +329,6 @@ class LeRobotV2Dataset:
                 instruction = instruction.numpy()
         else:
             instruction = ''
-        lang_embeds = torch.load(OFFLOAD_DIR + f"{instruction}_embed.pt")
-        lang_attn_mask = torch.load(OFFLOAD_DIR + f"{instruction}_attn_mask.pt")
 
         steps = []
         for i in range(num_steps):
@@ -319,8 +340,6 @@ class LeRobotV2Dataset:
                 'state_std': state_std[i],
                 'state_mean': state_mean[i],
                 'state_norm': state_norm[i],
-                'embed': lang_embeds,
-                'attn_mask': lang_attn_mask,
                 'json_content': {
                     'dataset_name': dataset_name,
                     'instruction': instruction,
@@ -349,7 +368,7 @@ class LeRobotV2Dataset:
             if episode == None:
                 continue
 
-            yield self._preprocess_episode(episode, dataset_name)            
+            yield self.preprocess_episode(episode, dataset_name)            
 
 if __name__ == "__main__":
     dataset = LeRobotV2Dataset(0, 'finetune')
