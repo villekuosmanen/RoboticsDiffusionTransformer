@@ -183,3 +183,4 @@ wandb/
 hostfile.txt
 .deepspeed_env
 rdt-1b
+data/lerobot/lang_embeddings/*.pt

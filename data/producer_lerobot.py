@@ -159,7 +159,10 @@ def save_sample(step_dict, chunk_dir, chunk_item_idx):
             past_frames_3_time_mask=step_dict['past_frames_3_time_mask'].numpy(),
             state_std=step_dict['state_std'].numpy(),
             state_mean=step_dict['state_mean'].numpy(),
-            state_norm=step_dict['state_norm'].numpy(),            
+            state_norm=step_dict['state_norm'].numpy(),
+            # pre-computed language embeddings
+            embed=step_dict['embed'].float().numpy(),
+            attn_mask=step_dict['attn_mask'].float().numpy(),            
         )
     lock.release_lock()
     return

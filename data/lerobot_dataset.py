@@ -8,6 +8,7 @@ import tensorflow_datasets as tfds
 import torch
 
 from state_vec import STATE_VEC_IDX_MAPPING, STATE_VEC_LEN
+OFFLOAD_DIR = "data/lerobot/lang_embeddings/"
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 # from lerobot_data.tfds_builder import LeRobotV2DatasetTFDSBuilder
 
@@ -211,9 +212,6 @@ class LeRobotV2Dataset:
 
     def _preprocess_episode(self, episode, dataset_name):
         """Convert raw episode to tensor format with all necessary preprocessing."""
-
-        print(f"shape of states: {episode['observation.state'].shape}")
-        print(f"shape of actions: {episode['action'].shape}")
         states_raw, state_masks_raw = _format_joint_to_state(episode['observation.state'])
         actions_raw, actions_mask = _format_joint_to_state(episode['action'])
 
@@ -308,6 +306,8 @@ class LeRobotV2Dataset:
                 instruction = instruction.numpy()
         else:
             instruction = ''
+        lang_embeds = torch.load(OFFLOAD_DIR + f"{instruction}_embed.pt")
+        lang_attn_mask = torch.load(OFFLOAD_DIR + f"{instruction}_attn_mask.pt")
 
         steps = []
         for i in range(num_steps):
@@ -319,6 +319,8 @@ class LeRobotV2Dataset:
                 'state_std': state_std[i],
                 'state_mean': state_mean[i],
                 'state_norm': state_norm[i],
+                'embed': lang_embeds,
+                'attn_mask': lang_attn_mask,
                 'json_content': {
                     'dataset_name': dataset_name,
                     'instruction': instruction,
