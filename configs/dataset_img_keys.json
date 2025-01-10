@@ -688,5 +688,23 @@
             "n/a"
         ],
         "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/pick_coffee_capsule_under_dome": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/fold_clothes_dining": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
     }
 }

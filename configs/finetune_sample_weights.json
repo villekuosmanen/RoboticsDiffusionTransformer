@@ -1,15 +1,17 @@
 {
-    "villekuosmanen/pass_laser_pointer": 60,
-    "villekuosmanen/move_glass_cups": 35,
-    "villekuosmanen/rice-cooker_step_0": 33,
-    "villekuosmanen/rice-cooker_step_1_truncated_x": 32,
-    "villekuosmanen/rice-cooker_step_2": 33,
-    "villekuosmanen/rice-cooker_step_3": 33,
-    "villekuosmanen/pick_coffee_capsule_merged": 385,
-    "villekuosmanen/pick_coffee_prop_center_merged": 200,
+    "villekuosmanen/pass_laser_pointer": 50,
+    "villekuosmanen/move_glass_cups": 30,
+    "villekuosmanen/rice-cooker_step_0": 20,
+    "villekuosmanen/rice-cooker_step_1_truncated_x": 20,
+    "villekuosmanen/rice-cooker_step_2": 20,
+    "villekuosmanen/rice-cooker_step_3": 20,
+    "villekuosmanen/pick_coffee_capsule_merged": 80,
+    "villekuosmanen/pick_coffee_prop_center_merged": 120,
     "villekuosmanen/pack_shoes": 100,
     "villekuosmanen/close_shoebox": 99,
-    "villekuosmanen/pick_up_lid": 30,
+    "villekuosmanen/pick_up_lid": 20,
     "villekuosmanen/fold_hand_towel": 12,
-    "villekuosmanen/lift_cup_remove_capsule_": 12
+    "villekuosmanen/lift_cup_remove_capsule_": 12,
+    "villekuosmanen/pick_coffee_capsule_under_dome": 18,
+    "villekuosmanen/fold_clothes_dining": 120
 }
