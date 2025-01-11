@@ -180,15 +180,15 @@ def train(args, logger):
     
     # Define LoRA config targeting last few blocks
     lora_config = LoraConfig(
-        r=8,
+        r=4,
         lora_alpha=32,
         target_modules=[
             # Last 4 blocks attention layers
-            *[f"model.blocks.{i}.attn.qkv" for i in range(24, 28)],
-            *[f"model.blocks.{i}.attn.proj" for i in range(24, 28)],
-            *[f"model.blocks.{i}.cross_attn.q" for i in range(24, 28)],
-            *[f"model.blocks.{i}.cross_attn.kv" for i in range(24, 28)],
-            *[f"model.blocks.{i}.cross_attn.proj" for i in range(24, 28)]
+            *[f"model.blocks.{i}.attn.qkv" for i in range(0, 28)],
+            *[f"model.blocks.{i}.attn.proj" for i in range(0, 28)],
+            *[f"model.blocks.{i}.cross_attn.q" for i in range(0, 28)],
+            *[f"model.blocks.{i}.cross_attn.kv" for i in range(0, 28)],
+            *[f"model.blocks.{i}.cross_attn.proj" for i in range(0, 28)]
         ],
         lora_dropout=0.1,
         bias="none",
