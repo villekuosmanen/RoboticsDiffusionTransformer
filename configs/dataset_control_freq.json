@@ -74,5 +74,7 @@
     "villekuosmanen/close_shoebox": 50,
     "villekuosmanen/pick_up_lid": 50,
     "villekuosmanen/fold_hand_towel": 50,
-    "villekuosmanen/lift_cup_remove_capsule_": 50
+    "villekuosmanen/lift_cup_remove_capsule_": 50,
+    "villekuosmanen/pick_coffee_capsule_under_dome": 50,
+    "villekuosmanen/fold_clothes_dining": 50
 }
