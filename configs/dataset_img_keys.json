@@ -706,5 +706,14 @@
             "n/a"
         ],
         "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/move_objects_dining_table": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
     }
 }

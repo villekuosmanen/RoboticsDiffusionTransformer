@@ -127,6 +127,17 @@ class LeRobotV2Dataset:
             self.episode_counters[dataset_name] = 0
             self.sample_weights.append(sample_weights[dataset_name])
 
+        # Print dataset stats
+        total_frames = 0
+        fps = 50
+        for dataset in self.datasets.values():
+            total_frames += dataset.meta.total_frames
+        print(f"total frames: {total_frames}")
+        hours_of_data = total_frames / fps
+        import time
+        print(f"Amount of robot data included: {time.strftime('%H:%M:%S', time.gmtime(hours_of_data))}")
+
+
         # Normalize weights
         self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
         self.sample_weights /= np.sum(self.sample_weights)
