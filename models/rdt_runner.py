@@ -11,6 +11,7 @@ from diffusers.schedulers.scheduling_dpmsolver_multistep import \
 from models.hub_mixin import CompatiblePyTorchModelHubMixin
 from models.rdt.model import RDT
 
+from data.state_vec import AGILEX_STATE_INDICES_BIMANUAL
 
 class RDTRunner(
         nn.Module, 
@@ -41,18 +42,21 @@ class RDTRunner(
         self.lang_adaptor = self.build_condition_adapter(
             config['lang_adaptor'], 
             in_features=lang_token_dim, 
-            out_features=hidden_size
+            out_features=hidden_size,
+            dtype=dtype,
         )
         self.img_adaptor = self.build_condition_adapter(
             config['img_adaptor'], 
             in_features=img_token_dim, 
-            out_features=hidden_size
+            out_features=hidden_size,
+            dtype=dtype,
         )
         # A `state` refers to an action or a proprioception vector
         self.state_adaptor = self.build_condition_adapter(
             config['state_adaptor'], 
             in_features=state_token_dim * 2,    # state + state mask (indicator)
-            out_features=hidden_size
+            out_features=hidden_size,
+            dtype=dtype,
         )
         
         # Create the noise scheduler
@@ -83,19 +87,24 @@ class RDTRunner(
             [p.numel() for p in self.state_adaptor.parameters()]))
     
     def build_condition_adapter(
-        self, projector_type, in_features, out_features):
+        self,
+        projector_type,
+        in_features,
+        out_features,
+        dtype=torch.bfloat16,
+    ):
         projector = None
         if projector_type == 'linear':
-            projector = nn.Linear(in_features, out_features)
+            projector = nn.Linear(in_features, out_features).to(dtype)
         else:
             mlp_gelu_match = re.match(r'^mlp(\d+)x_gelu$', projector_type)
             if mlp_gelu_match:
                 mlp_depth = int(mlp_gelu_match.group(1))
-                modules = [nn.Linear(in_features, out_features)]
+                modules = [nn.Linear(in_features, out_features).to(dtype)]
                 for _ in range(1, mlp_depth):
-                    modules.append(nn.GELU(approximate="tanh"))
-                    modules.append(nn.Linear(out_features, out_features))
-                projector = nn.Sequential(*modules)
+                    modules.append(nn.GELU(approximate="tanh").to(dtype))
+                    modules.append(nn.Linear(out_features, out_features).to(dtype))
+                projector = nn.Sequential(*modules).to(dtype)
 
         if projector is None:
             raise ValueError(f'Unknown projector type: {projector_type}')
@@ -222,7 +231,12 @@ class RDTRunner(
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        loss = F.mse_loss(pred, target)
+        # Extract only the relevant dimensions for loss computation
+        pred_control = pred[:, :, AGILEX_STATE_INDICES_BIMANUAL]
+        target_control = target[:, :, AGILEX_STATE_INDICES_BIMANUAL]
+        
+        # Compute loss only on the control-relevant dimensions
+        loss = F.mse_loss(pred_control, target_control)
         return loss
     
     # ========= Inference  ============

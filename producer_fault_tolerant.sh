@@ -5,7 +5,7 @@ trap 'echo "Caught interrupt signal. Exiting..."; exit 1' INT QUIT
 
 while true; do
     echo "Starting Python process..."
-    python data/producer_lerobot.py --dataset_type finetune
+    python data/producer_lerobot.py --dataset_type finetune --fill_up
 
     # Check if the process was killed by a signal
     exit_code=$?

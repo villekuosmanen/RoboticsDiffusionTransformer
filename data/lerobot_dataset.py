@@ -7,7 +7,7 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 import torch
 
-from state_vec import STATE_VEC_IDX_MAPPING, STATE_VEC_LEN
+from state_vec import AGILEX_STATE_INDICES, AGILEX_STATE_INDICES_BIMANUAL, STATE_VEC_LEN
 OFFLOAD_DIR = "data/lerobot/lang_embeddings/"
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 # from lerobot_data.tfds_builder import LeRobotV2DatasetTFDSBuilder
@@ -29,23 +29,7 @@ EPSD_LEN_THRESH_HIGH = config['dataset']['epsd_len_thresh_high']
 with open('configs/dataset_img_keys.json', 'r') as file:
     IMAGE_KEYS = json.load(file)
 
-AGILEX_STATE_INDICES = [
-    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-] + [
-    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-]
-
-AGILEX_STATE_INDICES_BIMANUAL = [
-    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-] + [
-    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-] + [
-    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-] + [
-    STATE_VEC_IDX_MAPPING[f"right_gripper_open"]
-]
-
-def _format_joint_to_state(joints):
+def _format_joint_to_state(joints, is_agilex: bool):
         """
         Format the joint proprioception into the unified action vector.
 
@@ -56,16 +40,19 @@ def _format_joint_to_state(joints):
         Returns:
             state (torch.Tensor): The formatted vector for RDT ([B, N, 128]). 
         """
+        # in AgileX datasets, gripper size is measured in centimeters, while the default for default ARX5 SDK is in meters.
+        gripper_multiplier = 0.20 if is_agilex else 20
+
         # Rescale the gripper to the range of [0, 1]
         if len(joints[0]) == 7:
             joints = joints * torch.tensor(
-                [[1, 1, 1, 1, 1, 1, 20]],
+                [[1, 1, 1, 1, 1, 1, gripper_multiplier]],
                 device=joints.device, dtype=joints.dtype
             )
             state_indices = AGILEX_STATE_INDICES
         elif len(joints[0]) == 14:
             joints = joints * torch.tensor(
-                [[1, 1, 1, 1, 1, 1, 20, 1, 1, 1, 1, 1, 1, 20]],
+                [[1, 1, 1, 1, 1, 1, gripper_multiplier, 1, 1, 1, 1, 1, 1, gripper_multiplier]],
                 device=joints.device, dtype=joints.dtype
             )
             state_indices = AGILEX_STATE_INDICES_BIMANUAL
@@ -86,6 +73,114 @@ def _format_joint_to_state(joints):
         )
         state_elem_mask[:, state_indices] = 1
         return state, state_elem_mask
+
+def get_past_states(states, episode_start, episode_end):
+    state_indices = tf.range(episode_start, episode_end)
+    
+    def get_history_slice(i):
+        # Get available history
+        history = states[max(0, i - ACTION_CHUNK_SIZE):i]
+        # Get the actual size we got
+        actual_size = tf.shape(history)[0]
+        
+        # If we need padding
+        if actual_size < ACTION_CHUNK_SIZE:
+            # Get the first state (either from history or current position if history is empty)
+            first_state = tf.cond(
+                tf.greater(actual_size, 0),
+                lambda: history[0],
+                lambda: states[i]
+            )
+            first_state = tf.expand_dims(first_state, 0)
+            
+            # Create padding
+            padding_size = ACTION_CHUNK_SIZE - actual_size
+            padding = tf.repeat(first_state, padding_size, axis=0)
+            
+            # Combine padding with history
+            return tf.concat([padding, history], axis=0)
+        
+        return history
+    
+    past_states = tf.map_fn(
+        get_history_slice,
+        state_indices,
+        dtype=tf.float32
+    )
+    
+    return past_states
+
+def get_future_actions(actions, episode_start, episode_end):
+    action_indices = tf.range(episode_start, episode_end)
+    
+    def get_future_slice(i):
+        # Get available future actions
+        future = actions[i:i + ACTION_CHUNK_SIZE]
+        # Get the actual size we got
+        actual_size = tf.shape(future)[0]
+        
+        # If we need padding
+        if actual_size < ACTION_CHUNK_SIZE:
+            # Get the last action (either from future or current position if future is empty)
+            last_action = tf.cond(
+                tf.greater(actual_size, 0),
+                lambda: future[-1],
+                lambda: actions[i]
+            )
+            last_action = tf.expand_dims(last_action, 0)
+            
+            # Create padding
+            padding_size = ACTION_CHUNK_SIZE - actual_size
+            padding = tf.repeat(last_action, padding_size, axis=0)
+            
+            # Combine future with padding
+            return tf.concat([future, padding], axis=0)
+        
+        return future
+    
+    future_actions = tf.map_fn(
+        get_future_slice,
+        action_indices,
+        dtype=tf.float32
+    )
+    
+    return future_actions
+
+def get_past_frames(frames, episode_start, episode_end):
+    frame_indices = tf.range(episode_start, episode_end)
+    
+    def get_history_slice(i):
+        # Get available history
+        history = frames[max(0, i - IMG_HISTORY_SIZE):i]
+        # Get the actual size we got
+        actual_size = tf.shape(history)[0]
+        
+        # If we need padding
+        if actual_size < IMG_HISTORY_SIZE:
+            # Get the first frame (either from history or current position if history is empty)
+            first_frame = tf.cond(
+                tf.greater(actual_size, 0),
+                lambda: history[0],
+                lambda: frames[i]
+            )
+            first_frame = tf.expand_dims(first_frame, 0)
+            
+            # Create padding
+            padding_size = IMG_HISTORY_SIZE - actual_size
+            padding = tf.repeat(first_frame, padding_size, axis=0)
+            
+            # Combine padding with history
+            return tf.concat([padding, history], axis=0)
+        
+        return history
+    
+    past_frames = tf.map_fn(
+        get_history_slice,
+        frame_indices,
+        dtype=tf.float32
+    )
+    
+    return past_frames, frame_indices
 
 class LeRobotV2Dataset:
     """
@@ -129,10 +224,13 @@ class LeRobotV2Dataset:
 
         # Print dataset stats
         total_frames = 0
+        total_episodes = 0
         fps = 50
         for dataset in self.datasets.values():
             total_frames += dataset.meta.total_frames
+            total_episodes += dataset.num_episodes
         print(f"total frames: {total_frames}")
+        print(f"total number of trajectories: {total_episodes}")
         hours_of_data = total_frames / fps
         import time
         print(f"Amount of robot data included: {time.strftime('%H:%M:%S', time.gmtime(hours_of_data))}")
@@ -144,33 +242,51 @@ class LeRobotV2Dataset:
 
     def sample_episode_frames(self, from_idx, to_idx):
         episode_length = to_idx - from_idx
+        MIN_HORIZON_SIZE = 10
+        horizon_size = max(MIN_HORIZON_SIZE, ACTION_CHUNK_SIZE)
         
-        if episode_length <= self.max_steps:
-            # If episode is shorter than max_steps, return full episode
-            return (from_idx, to_idx)
+        # First ensure we have enough space for the window plus minimum horizons
+        total_required_space = self.max_steps + (2 * horizon_size)
+        if episode_length <= total_required_space:
+            # If episode is too short to accommodate window + horizons,
+            # just return the full episode
+            return (from_idx, from_idx, to_idx, to_idx)
+        
+        # Calculate the valid range for the window start position,
+        # ensuring space for horizons on both sides
+        valid_start_min = from_idx + horizon_size
+        valid_start_max = to_idx - (self.max_steps + horizon_size)
         
         # First determine if a centered window is possible at the chosen point
         def get_valid_window(center_idx):
             half_window = self.max_steps // 2
             start = center_idx - half_window
-            end = start + self.max_steps  # Use full window length to handle odd max_steps
+            end = start + self.max_steps
             
-            # If window would go beyond bounds, adjust it
-            if start < from_idx:
-                # If too close to start, anchor at start
-                return (from_idx, from_idx + self.max_steps)
-            elif end > to_idx:
-                # If too close to end, anchor at end
-                return (to_idx - self.max_steps, to_idx)
+            # If window would go beyond valid bounds, adjust it
+            if start < valid_start_min:
+                # If too close to start, anchor at valid_start_min
+                return (valid_start_min, valid_start_min + self.max_steps)
+            elif end > (to_idx - horizon_size):
+                # If too close to end, anchor at the last valid position
+                return (valid_start_max, to_idx - horizon_size)
             else:
                 # Center window is valid
                 return (start, end)
         
-        # Pick a random center point across full range
-        center_idx = random.randint(from_idx, to_idx)
-        window = get_valid_window(center_idx)
+        # Pick a random center point across valid range
+        valid_center_min = valid_start_min + (self.max_steps // 2)
+        valid_center_max = to_idx - (self.max_steps // 2) - horizon_size
+        center_idx = random.randint(valid_center_min, valid_center_max)
         
-        return window
+        window_start, window_end = get_valid_window(center_idx)
+        
+        # Now calculate horizons - they'll always be exactly horizon_size
+        # since we've ensured the space exists
+        horizon_from = window_start - horizon_size
+        horizon_to = window_end + horizon_size
+        
+        return (horizon_from, window_start, window_end, horizon_to)
 
     def get_episode(self, dataset_name):
         """Get next episode from a dataset."""
@@ -189,14 +305,16 @@ class LeRobotV2Dataset:
         if to_idx - from_idx < EPSD_LEN_THRESH_LOW:
             # return nothing if too small of an episode
             self.episode_counters[dataset_name] = counter + 1
-            return None
-        (from_idx, to_idx) = self.sample_episode_frames(from_idx, to_idx)
+            return None, None, None
+        (horizon_from, from_idx, to_idx, horizon_to) = self.sample_episode_frames(from_idx, to_idx)
         
         # Get episode frames from parquet
-        print(f"from_idx: {from_idx}, to_idx: {to_idx}")
-        frames = dataset.hf_dataset[from_idx:to_idx]
-        # print(dataset.features)
-        # print(dataset.hf_features)
+        print(f"horizon_from: {horizon_from}, from_idx: {from_idx}, to_idx: {to_idx}, horizon_to: {horizon_to}")
+        frames = dataset.hf_dataset[horizon_from:horizon_to]
+        if (from_idx - horizon_from) < ACTION_CHUNK_SIZE:
+            print("restricted horizon for states")
+        if (horizon_to - to_idx) < ACTION_CHUNK_SIZE:
+            print("restricted horizon for actions")
 
         # Get video data for each camera
         camera_keys = [k for k in dataset.features.keys() if k.startswith('observation.images.')]
@@ -219,7 +337,7 @@ class LeRobotV2Dataset:
         # Update counter
         self.episode_counters[dataset_name] = counter + 1
         
-        return episode_data
+        return episode_data, (from_idx - horizon_from), (to_idx - horizon_from)
     
     def get_preprocessed_states(self, dataset_name):
         dataset = self.datasets[dataset_name]
@@ -239,53 +357,40 @@ class LeRobotV2Dataset:
                 episode_data[key] = stacked
             
             # pre-process
-            states_raw, _ = _format_joint_to_state(episode_data['observation.state'])
+            states_raw, _ = _format_joint_to_state(episode_data['observation.state'], "agilex_" in dataset_name)
             preprocessed_states.append(tf.convert_to_tensor(states_raw.numpy(), dtype=tf.float32))
 
         return preprocessed_states
 
-    def preprocess_episode(self, episode, dataset_name):
+    def preprocess_episode(self, episode, episode_start, episode_end, dataset_name):
         """Convert raw episode to tensor format with all necessary preprocessing."""
-        states_raw, state_masks_raw = _format_joint_to_state(episode['observation.state'])
-        actions_raw, actions_mask = _format_joint_to_state(episode['action'])
+        states_raw, state_masks_raw = _format_joint_to_state(episode['observation.state'], "agilex_" in dataset_name)
+        actions_raw, actions_mask = _format_joint_to_state(episode['action'], "agilex_" in dataset_name)
 
         # Get all states and actions from episode
         states = tf.convert_to_tensor(states_raw.numpy(), dtype=tf.float32)
         state_masks = tf.convert_to_tensor(state_masks_raw.numpy(), dtype=tf.float32)
         actions = tf.convert_to_tensor(actions_raw.numpy(), dtype=tf.float32)
 
-        # Handle state history (past states window)
-        first_state = tf.expand_dims(states[0], axis=0)
-        first_state = tf.repeat(first_state, ACTION_CHUNK_SIZE-1, axis=0)
-        padded_states = tf.concat([first_state, states], axis=0)
-        state_indices = tf.range(ACTION_CHUNK_SIZE, tf.shape(states)[0] + ACTION_CHUNK_SIZE)
-        past_states = tf.map_fn(
-            lambda i: padded_states[i - ACTION_CHUNK_SIZE:i],
-            state_indices,
-            dtype=tf.float32  # Explicitly specify TF dtype
-        )
+        past_states = get_past_states(states, episode_start, episode_end)
+        future_actions = get_future_actions(actions, episode_start, episode_end)
+
+        # Calculate stats only on the episode portion
+        episode_states = states[episode_start:episode_end]
+        state_std = tf.math.reduce_std(episode_states, axis=0, keepdims=True)
+        state_mean = tf.math.reduce_mean(episode_states, axis=0, keepdims=True)
+        state_norm = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(episode_states), axis=0, keepdims=True))
         
-        # Handle future actions window
-        last_action = tf.expand_dims(actions[-1], axis=0)
-        last_action = tf.repeat(last_action, ACTION_CHUNK_SIZE, axis=0)
-        padded_actions = tf.concat([actions, last_action], axis=0)
-        action_indices = tf.range(0, tf.shape(actions)[0])
-        future_actions = tf.map_fn(
-            lambda i: padded_actions[i:i + ACTION_CHUNK_SIZE],
-            action_indices,
-            dtype=tf.float32
-        )
+        # Repeat stats to match episode length (not full sequence length)
+        episode_length = episode_end - episode_start
+        state_std = tf.repeat(state_std, episode_length, axis=0)
+        state_mean = tf.repeat(state_mean, episode_length, axis=0)
+        state_norm = tf.repeat(state_norm, episode_length, axis=0)
         
-        # Calculate stats
-        state_std = tf.math.reduce_std(states, axis=0, keepdims=True)
-        state_mean = tf.math.reduce_mean(states, axis=0, keepdims=True)
-        state_norm = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(states), axis=0, keepdims=True))
-        
-        # Repeat stats to match sequence length
-        state_std = tf.repeat(state_std, tf.shape(states)[0], axis=0)
-        state_mean = tf.repeat(state_mean, tf.shape(states)[0], axis=0)
-        state_norm = tf.repeat(state_norm, tf.shape(states)[0], axis=0)
-        
+        # Handle camera frames
+        camera_frames = {}
+        camera_masks = {}
+
         # Handle camera frames
         camera_frames = {}
         camera_masks = {}
@@ -302,36 +407,28 @@ class LeRobotV2Dataset:
                     tf.shape(states)[0] - 1,
                     tf.zeros([0, 0, 0], dtype=tf.float32),
                 ).stack()
-            # Create frame history window
-            first_frame = tf.expand_dims(frames[0], axis=0)
-            first_frame = tf.repeat(first_frame, IMG_HISTORY_SIZE-1, axis=0)
-            padded_frames = tf.concat([first_frame, frames], axis=0)
-            frame_indices = tf.range(IMG_HISTORY_SIZE, tf.shape(frames)[0] + IMG_HISTORY_SIZE)
+
+            # Get frame history for each timestep in the episode
+            past_frames, frame_indices = get_past_frames(frames, episode_start, episode_end)
             
-            past_frames = tf.map_fn(
-                lambda i: padded_frames[i - IMG_HISTORY_SIZE:i],
-                frame_indices,
-                dtype=tf.float32
-            )
-            
-            # Create time masks for frames
-            frames_time_mask = tf.ones([tf.shape(frames)[0]], dtype=tf.bool)
-            padded_time_mask = tf.pad(
-                frames_time_mask, 
-                [[IMG_HISTORY_SIZE-1, 0]], 
-                "CONSTANT", 
-                constant_values=False
-            )
+            # Create masks indicating which frames are real vs padded
+            def create_chunk_mask(i):
+                # Calculate how many real frames we have for this chunk
+                real_frames = tf.minimum(i - max(0, i - IMG_HISTORY_SIZE), IMG_HISTORY_SIZE)
+                # Create mask with False for padded frames, True for real frames
+                mask = tf.concat([
+                    tf.zeros([IMG_HISTORY_SIZE - real_frames], dtype=tf.bool),
+                    tf.ones([real_frames], dtype=tf.bool)
+                ], axis=0)
+                return mask
+
             past_frames_time_mask = tf.map_fn(
-                lambda i: padded_time_mask[i - IMG_HISTORY_SIZE:i],
+                create_chunk_mask,
                 frame_indices,
                 dtype=tf.bool
             )
-            
             camera_frames[f'past_frames_{idx}'] = past_frames
             camera_masks[f'past_frames_{idx}_time_mask'] = past_frames_time_mask
-
-        num_steps = tf.shape(states)[0]
 
         # Get the dataset name and instruction
         instruction = episode.get('language_instruction', None)
@@ -342,15 +439,18 @@ class LeRobotV2Dataset:
             instruction = ''
 
         steps = []
-        for i in range(num_steps):
+        # Iterate only over the episode portion
+        for step_idx in range(episode_length):
+            abs_idx = step_idx + episode_start  # Convert to absolute index for accessing full data
+            
             step_dict = {
-                'step_id': tf.constant(i, dtype=tf.uint8),
-                'state_chunk': past_states[i],
-                'action_chunk': future_actions[i],
-                'state_vec_mask': state_masks[i],
-                'state_std': state_std[i],
-                'state_mean': state_mean[i],
-                'state_norm': state_norm[i],
+                'step_id': tf.constant(step_idx, dtype=tf.uint8),  # Use relative index for step_id
+                'state_chunk': past_states[step_idx],              # These are already episode-only
+                'action_chunk': future_actions[step_idx],          # These are already episode-only
+                'state_vec_mask': state_masks[abs_idx],           # Use absolute index for full data
+                'state_std': state_std[step_idx],                 # These are episode-only
+                'state_mean': state_mean[step_idx],
+                'state_norm': state_norm[step_idx],
                 'json_content': {
                     'dataset_name': dataset_name,
                     'instruction': instruction,
@@ -359,14 +459,14 @@ class LeRobotV2Dataset:
             
             # Add camera frames and masks for this timestep
             for cam_key in camera_frames:
-                step_dict[cam_key] = camera_frames[cam_key][i]
+                step_dict[cam_key] = camera_frames[cam_key][step_idx]       # These are episode-only
                 mask_key = f"{cam_key}_time_mask"
-                step_dict[mask_key] = camera_masks[mask_key][i]
+                step_dict[mask_key] = camera_masks[mask_key][step_idx]      # These are episode-only
             
             steps.append(step_dict)
 
         return steps
-    
+
     def __iter__(self):
         """Iterate over episodes."""
         while True:
@@ -375,11 +475,11 @@ class LeRobotV2Dataset:
                 p=self.sample_weights
             )
             
-            episode = self.get_episode(dataset_name)
+            episode, episode_start, episode_end = self.get_episode(dataset_name)
             if episode == None:
                 continue
 
-            yield self.preprocess_episode(episode, dataset_name)            
+            yield self.preprocess_episode(episode, episode_start, episode_end, dataset_name)            
 
 if __name__ == "__main__":
     dataset = LeRobotV2Dataset(0, 'finetune')

@@ -644,6 +644,24 @@
         ],
         "image_mask":[1,0,1,0]
     },
+    "villekuosmanen/pick_coffee_prop_20Hz": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
+    "villekuosmanen/pick_coffee_prop_20Hz_alt": {
+        "image_keys": [
+            "observation.images.front",
+            "n/a",
+            "observation.images.wrist",
+            "n/a"
+        ],
+        "image_mask":[1,0,1,0]
+    },
     "villekuosmanen/pack_shoes": {
         "image_keys": [
             "observation.images.front",
@@ -707,11 +725,137 @@
         ],
         "image_mask":[1,1,1,0]
     },
-    "villekuosmanen/move_objects_dining_table": {
+    "villekuosmanen/move_objects_multitask": {
         "image_keys": [
             "observation.images.front",
             "observation.images.right_wrist",
             "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/kitchen_interactions": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/interactive_objects": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/fold_teat_towel_desk": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/manipulate_glasses": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/insert_paper_towel": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/stack_pepsi_cans": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/sort_coloured_pins": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/open_close_zipper_bags": {
+        "image_keys": [
+            "observation.images.front",
+            "observation.images.right_wrist",
+            "observation.images.left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/agilex_close_glasses_box": {
+        "image_keys": [
+            "observation.images.cam_high",
+            "observation.images.cam_right_wrist",
+            "observation.images.cam_left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/agilex_messy_stack_tomatoes": {
+        "image_keys": [
+            "observation.images.cam_high",
+            "observation.images.cam_right_wrist",
+            "observation.images.cam_left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/agilex_pick_staples_into_stapler": {
+        "image_keys": [
+            "observation.images.cam_high",
+            "observation.images.cam_right_wrist",
+            "observation.images.cam_left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/agilex_pick_the_different_dice": {
+        "image_keys": [
+            "observation.images.cam_high",
+            "observation.images.cam_right_wrist",
+            "observation.images.cam_left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/agilex_pour_water_cup_half": {
+        "image_keys": [
+            "observation.images.cam_high",
+            "observation.images.cam_right_wrist",
+            "observation.images.cam_left_wrist",
+            "n/a"
+        ],
+        "image_mask":[1,1,1,0]
+    },
+    "villekuosmanen/agilex_pull_wet_wipe": {
+        "image_keys": [
+            "observation.images.cam_high",
+            "observation.images.cam_right_wrist",
+            "observation.images.cam_left_wrist",
             "n/a"
         ],
         "image_mask":[1,1,1,0]

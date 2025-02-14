@@ -30,7 +30,7 @@ def log_sample_res(
         states = states[:, -1:, :]
         actions = batch["actions"].to(dtype=weight_dtype)
         state_elem_mask = batch["state_elem_mask"].to(dtype=weight_dtype)
-            
+
         batch_size, _, C, H, W = images.shape
         image_embeds = vision_encoder(images.reshape(-1, C, H, W)).detach()
         image_embeds = image_embeds.reshape((batch_size, -1, vision_encoder.hidden_size))

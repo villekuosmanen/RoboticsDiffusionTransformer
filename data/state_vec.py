@@ -112,3 +112,19 @@ STATE_VEC_IDX_MAPPING = {
     # [103, 128): reserved
 }
 STATE_VEC_LEN = 128
+
+AGILEX_STATE_INDICES = [
+    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
+] + [
+    STATE_VEC_IDX_MAPPING["left_gripper_open"]
+]
+
+AGILEX_STATE_INDICES_BIMANUAL = [
+    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
+] + [
+    STATE_VEC_IDX_MAPPING["left_gripper_open"]
+] + [
+    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
+] + [
+    STATE_VEC_IDX_MAPPING[f"right_gripper_open"]
+]
