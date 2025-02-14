@@ -19,9 +19,9 @@ dataset:
   # read by the consumer with new data
 
   # The path to the buffer (at least 400GB)
-  buf_path: /path/to/buffer
+  buf_path: /mnt/data/rdt-buffer
   # The number of chunks in the buffer
-  buf_num_chunks: 512
+  buf_num_chunks: 30
   # The number of samples (step rather than episode) in each chunk
   buf_chunk_size: 512
 
@@ -30,7 +30,7 @@ dataset:
   # For those more than `epsd_len_thresh_high`,
   # we will randomly sample `epsd_len_thresh_high` steps each time we load the episode
   # to better balance the training datasets
-  epsd_len_thresh_high: 2048
+  epsd_len_thresh_high: 16
   # How to fit the image size
   image_aspect_ratio: pad
   # Maximum number of language tokens

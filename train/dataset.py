@@ -13,10 +13,11 @@ from torchvision import transforms
 from PIL import Image
 import transformers
 
-from data.filelock import FileLock
+from data.filelock_local import FileLock
 from data.hdf5_vla_dataset import HDF5VLADataset
 from train.image_corrupt import image_corrupt
 
+OFFLOAD_DIR = "data/lerobot/lang_embeddings/"
 
 def get_clean_item(chunk_dir):
     """
@@ -304,7 +305,8 @@ class VLAConsumerDataset(Dataset):
                         image, valid = images[i], image_mask[i]
                         if valid and (math.prod(image.shape) > 0) and \
                             (random.random() > mask_probs[j]):
-                            rearranged_images.append((image, True))
+                            # TODO: only works for LeRobot images
+                            rearranged_images.append((convert_image(image), True))
                         else:
                             rearranged_images.append((background_image.copy(), False))
                 
@@ -351,10 +353,22 @@ class VLAConsumerDataset(Dataset):
                 data_dict["images"] = preprocessed_images
 
                 if self.use_precomp_lang_embed:
-                    if content["instruction"][-1] == ".":
-                        content["instruction"] = content["instruction"][:-1]
-                    data_dict["lang_embed"] = torch.load(content["instruction"]) \
-                        if random.random() > self.cond_mask_prob else self.empty_lang_embed
+                    # load pre-computed language embeddings
+                    lang_instruction = content["instruction"]
+                    lang_embeds = torch.load(OFFLOAD_DIR + f"{lang_instruction}_embed.pt")
+                    lang_attn_mask = torch.load(OFFLOAD_DIR + f"{lang_instruction}_attn_mask.pt")
+                    
+                    if random.random() > self.cond_mask_prob:
+                        data_dict["lang_embed"] = lang_embeds
+                        data_dict["lang_attn_mask"] = lang_attn_mask
+                    else:
+                        data_dict["lang_embed"] = self.empty_lang_embed
+
+
+                    # if content["instruction"][-1] == ".":
+                    #     content["instruction"] = content["instruction"][:-1]
+                    # data_dict["lang_embed"] = torch.load(content["instruction"]) \
+                        # if random.random() > self.cond_mask_prob else self.empty_lang_embed
                 else:
                     instruction = content["instruction"] \
                         if random.random() > self.cond_mask_prob else ""
@@ -386,6 +400,14 @@ class VLAConsumerDataset(Dataset):
                 traceback.print_exc()
                 # Try incresing the index
                 index = (index + 1) % len(self)
+
+def convert_image(img):
+    image = np.transpose(img, (1, 2, 0))  # Reorder to (H,W,C)
+    
+    # If values are in [0,1] range, scale to [0,255]
+    if image.max() <= 1.0:
+        image = (image * 255).astype(np.uint8)
+    return image
 
 
 class DataCollatorForVLAConsumerDataset(object):

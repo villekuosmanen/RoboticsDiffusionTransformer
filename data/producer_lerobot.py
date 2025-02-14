@@ -9,11 +9,13 @@ import random
 from multiprocessing import Process
 import yaml
 
+import cv2
+
 import numpy as np
 import tensorflow as tf
 
-from data.vla_dataset import VLADataset
-from data.filelock_local import FileLock
+from lerobot_dataset import LeRobotV2Dataset
+from filelock_local import FileLock
 
 
 # Producer does not need GPU
@@ -97,62 +99,80 @@ def read_dirty_bit(chunk_dir):
     # If failed to read the dirty bit, return all ones for robustness
     return np.ones(BUF_CHUNK_SIZE, dtype=np.uint8)
 
+def debug_vis(img, name):
+    image = img.numpy()  # Convert tensor to numpy if needed
+    image = np.transpose(image, (1, 2, 0))  # Reorder to (H,W,C)
+
+    # If values are in [0,1] range, scale to [0,255]
+    if image.max() <= 1.0:
+        image = (image * 255).astype(np.uint8)
+
+    # Option 1: Display with OpenCV
+    cv2.imshow(name, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))  # OpenCV uses BGR
+    cv2.waitKey(0)
+
 
 def save_sample(step_dict, chunk_dir, chunk_item_idx):
     """
     Save a sample to the chunk directory.
     """
     # Save the json content
-    time_stmp = time.time()
-    while time.time() - time_stmp < 10.0:
-        try:
-            locks = []
-            json_content = step_dict['json_content']
-            file_path = os.path.join(chunk_dir, f"json_content_{chunk_item_idx}.json")
-            lock = FileLock(file_path)
-            locks.append(lock)
-            lock.acquire_write_lock()
-            with open(file_path, 'w') as file:
-                json.dump(json_content, file, indent=4)
-            lock.release_lock()
-            # Save all other tensors in a npz
-            file_path = os.path.join(chunk_dir, f"sample_{chunk_item_idx}.npz")
-            lock = FileLock(file_path)
-            locks.append(lock)
-            lock.acquire_write_lock()
-            with open(file_path, 'wb') as file:
-                np.savez(
-                    file,
-                    step_id=step_dict['step_id'].numpy(),
-                    state_chunk=step_dict['state_chunk'].numpy(),
-                    state_chunk_time_mask=step_dict['state_chunk_time_mask'].numpy(),
-                    action_chunk=step_dict['action_chunk'].numpy(),
-                    action_chunk_time_mask=step_dict['action_chunk_time_mask'].numpy(),
-                    state_vec_mask=step_dict['state_vec_mask'].numpy(),
-                    past_frames_0=step_dict['past_frames_0'].numpy(),
-                    past_frames_0_time_mask=step_dict['past_frames_0_time_mask'].numpy(),
-                    past_frames_1=step_dict['past_frames_1'].numpy(),
-                    past_frames_1_time_mask=step_dict['past_frames_1_time_mask'].numpy(),
-                    past_frames_2=step_dict['past_frames_2'].numpy(),
-                    past_frames_2_time_mask=step_dict['past_frames_2_time_mask'].numpy(),
-                    past_frames_3=step_dict['past_frames_3'].numpy(),
-                    past_frames_3_time_mask=step_dict['past_frames_3_time_mask'].numpy(),
-                    state_std=step_dict['state_std'].numpy(),
-                    state_mean=step_dict['state_mean'].numpy(),
-                    state_norm=step_dict['state_norm'].numpy(),            
-                )
-            lock.release_lock()
-            return
-        except KeyboardInterrupt:
-            for lock in locks:
-                lock.release_lock()
-            raise KeyboardInterrupt
-        except BaseException:
-            for lock in locks:
-                lock.release_lock()
-            continue
+    # time_stmp = time.time()
+    # while time.time() - time_stmp < 10.0:
+
+    # if step_dict['step_id'].numpy() > 10:
+    #     debug_vis(step_dict['past_frames_0'][0], "Front camera - past frame")
+    #     debug_vis(step_dict['past_frames_0'][1], "Front camera - current frame")
+    #     debug_vis(step_dict['past_frames_1'][0], "Wrist camera - past frame")
+    #     debug_vis(step_dict['past_frames_1'][1], "Wrist camera - current frame")
+
+    locks = []
+    json_content = step_dict['json_content']
+    file_path = os.path.join(chunk_dir, f"json_content_{chunk_item_idx}.json")
+    lock = FileLock(file_path)
+    locks.append(lock)
+    lock.acquire_write_lock()
+    with open(file_path, 'w') as file:
+        json.dump(json_content, file, indent=4)
+    lock.release_lock()
+    # Save all other tensors in a npz
+    file_path = os.path.join(chunk_dir, f"sample_{chunk_item_idx}.npz")
+    lock = FileLock(file_path)
+    locks.append(lock)
+    lock.acquire_write_lock()
+    with open(file_path, 'wb') as file:
+        np.savez(
+            file,
+            step_id=step_dict['step_id'].numpy(),
+            state_chunk=step_dict['state_chunk'].numpy(),
+            state_chunk_time_mask=np.array([]),
+            action_chunk=step_dict['action_chunk'].numpy(),
+            action_chunk_time_mask=np.array([]),
+            state_vec_mask=step_dict['state_vec_mask'].numpy(),
+            past_frames_0=step_dict['past_frames_0'].numpy(),
+            past_frames_0_time_mask=step_dict['past_frames_0_time_mask'].numpy(),
+            past_frames_1=step_dict['past_frames_1'].numpy(),
+            past_frames_1_time_mask=step_dict['past_frames_1_time_mask'].numpy(),
+            past_frames_2=step_dict['past_frames_2'].numpy(),
+            past_frames_2_time_mask=step_dict['past_frames_2_time_mask'].numpy(),
+            past_frames_3=step_dict['past_frames_3'].numpy(),
+            past_frames_3_time_mask=step_dict['past_frames_3_time_mask'].numpy(),
+            state_std=step_dict['state_std'].numpy(),
+            state_mean=step_dict['state_mean'].numpy(),
+            state_norm=step_dict['state_norm'].numpy(),
+        )
+    lock.release_lock()
+    return
+        # except KeyboardInterrupt:
+        #     for lock in locks:
+        #         lock.release_lock()
+        #     raise KeyboardInterrupt
+        # except BaseException:
+        #     for lock in locks:
+        #         lock.release_lock()
+        #     continue
     # raise RuntimeError("Failed to save sample.")
-    print("Failed to save sample.")
+    # print("Failed to save sample.")
 
 
 def run_producer(seed, num_workers, worker_id, fill_up, clean_dirty, dataset_type):
@@ -163,7 +183,7 @@ def run_producer(seed, num_workers, worker_id, fill_up, clean_dirty, dataset_typ
     (i.e., samples that have been read by the consumer)
     with new samples.
     """
-    vla_dataset = VLADataset(seed=seed, dataset_type=dataset_type)
+    lerobot_dataset = LeRobotV2Dataset(seed=seed, dataset_type=dataset_type)
     chunk_start_idx = worker_id * BUF_NUM_CHUNKS // num_workers
     chunk_end_idx = (worker_id + 1) * BUF_NUM_CHUNKS // num_workers
     if fill_up:
@@ -182,7 +202,7 @@ def run_producer(seed, num_workers, worker_id, fill_up, clean_dirty, dataset_typ
     dirty_chunk_idx = chunk_start_idx
     dirty_chunk_item_idxs = []
     time_stmp = time.time()
-    for episode_steps in vla_dataset:
+    for episode_steps in lerobot_dataset:
         for step in episode_steps:
             if fill_up and fill_chunk_idx < chunk_end_idx:
                 # Fill up the buffer
@@ -242,6 +262,7 @@ def run_producer(seed, num_workers, worker_id, fill_up, clean_dirty, dataset_typ
                     dirty_bit = np.zeros(BUF_CHUNK_SIZE, dtype=np.uint8)
                     save_dirty_bit(dirty_chunk_dir, dirty_bit)
                     print(f"Worker {worker_id}: Replaced dirty chunk {dirty_chunk_idx}.")
+        print("episode saved")
 
 
 if __name__ == '__main__':
