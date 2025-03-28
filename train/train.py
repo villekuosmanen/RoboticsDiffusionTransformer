@@ -30,7 +30,8 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import is_wandb_available
 from huggingface_hub import create_repo, upload_folder
 from tqdm.auto import tqdm
-from safetensors.torch import load_model
+from safetensors.torch import load_model, load_file
+from peft import LoraConfig, get_peft_model
 
 from models.ema_model import EMAModel
 from models.multimodal_encoder.siglip_encoder import SiglipVisionTower
@@ -176,7 +177,35 @@ def train(args, logger):
             ],
             dtype=weight_dtype,
         )
-        
+    
+    # Define LoRA config targeting last few blocks
+    lora_config = LoraConfig(
+        r=4,
+        lora_alpha=32,
+        target_modules=[
+            # Last 4 blocks attention layers
+            *[f"model.blocks.{i}.attn.qkv" for i in range(0, 28)],
+            *[f"model.blocks.{i}.attn.proj" for i in range(0, 28)],
+            *[f"model.blocks.{i}.cross_attn.q" for i in range(0, 28)],
+            *[f"model.blocks.{i}.cross_attn.kv" for i in range(0, 28)],
+            *[f"model.blocks.{i}.cross_attn.proj" for i in range(0, 28)]
+        ],
+        lora_dropout=0.1,
+        bias="none",
+    )
+
+    # Create PEFT model
+    rdt = get_peft_model(rdt, lora_config, autocast_adapter_dtype=False)
+
+    # Then convert LoRA layers to bfloat16
+    # for name, param in rdt.named_parameters():
+    #     if param.requires_grad:  # This will only affect LoRA parameters since base is frozen
+    #         param.data = param.data.to(torch.bfloat16)
+
+    # # Verify the conversion
+    for name, param in rdt.named_parameters():
+        if param.requires_grad:
+            print(f"{name}: {param.device}, {param.dtype}")
                                                                        
     ema_rdt = copy.deepcopy(rdt)
     ema_model = EMAModel(
@@ -193,9 +222,14 @@ def train(args, logger):
     def save_model_hook(models, weights, output_dir):
         if accelerator.is_main_process:
             for model in models:
-                model_to_save = model.module if hasattr(model, "module") else model  # type: ignore
+                model_to_save = model.module if hasattr(model, "module") else model
                 if isinstance(model_to_save, type(accelerator.unwrap_model(rdt))):
-                    model_to_save.save_pretrained(output_dir)
+                    # Save base model
+                    base_model = model_to_save.base_model
+                    base_model.save_pretrained(os.path.join(output_dir, "base_model"))
+                    
+                    # Save LoRA adapter separately
+                    model_to_save.save_pretrained(os.path.join(output_dir, "adapter_model"))
 
     accelerator.register_save_state_pre_hook(save_model_hook)
     
@@ -351,7 +385,7 @@ def train(args, logger):
         # Since EMA is deprecated, we do not load EMA from the pretrained checkpoint
         logger.info("Loading from a pretrained checkpoint.")
         checkpoint = torch.load(args.pretrained_model_name_or_path)
-        rdt.module.load_state_dict(checkpoint["module"])
+        rdt.base_model.model.module.load_state_dict(checkpoint["module"])
    
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
@@ -375,11 +409,41 @@ def train(args, logger):
                 accelerator.load_state(os.path.join(args.output_dir, path)) # load_module_strict=False
             except:
                 # load deepspeed's state_dict
-                logger.info("Resuming training state failed. Attempting to only load from model checkpoint.")
-                checkpoint = torch.load(os.path.join(args.output_dir, path, "pytorch_model", "mp_rank_00_model_states.pt"))
-                rdt.module.load_state_dict(checkpoint["module"])
+                logger.info("Resuming training state failed. Attempting to only load model weights.")
+                # Load base model weights
+                checkpoint_path = os.path.join(args.output_dir, path, "pytorch_model.bin")
+                checkpoint = torch.load(checkpoint_path)
+
+                # Remap the keys to match PEFT structure
+                new_checkpoint = {}
+                for key, value in checkpoint.items():
+                    # Your checkpoint has 'model.x' but PEFT expects 'base_model.model.model.x'
+                    new_key = f"base_model.model.{key}"
+                    new_checkpoint[new_key] = value
                 
-            load_model(ema_rdt, os.path.join(args.output_dir, path, "ema", "model.safetensors"))
+                # Try loading with remapped keys
+                rdt.load_state_dict(new_checkpoint, strict=False)
+
+                # Load LoRA weights separately
+                lora_path = os.path.join(args.output_dir, path, "adapter_model")
+                if os.path.exists(lora_path):
+                    rdt.load_adapter(lora_path, "default")
+
+            # Handle EMA model loading
+            ema_path = os.path.join(args.output_dir, path, "ema", "model.safetensors")
+            if os.path.exists(ema_path):
+                # Load EMA checkpoint using safetensors loader
+                ema_checkpoint = load_file(ema_path)
+                
+                # Remap EMA keys
+                new_ema_checkpoint = {}
+                for key, value in ema_checkpoint.items():
+                    new_key = f"base_model.model.{key}"
+                    new_ema_checkpoint[new_key] = value
+                
+                # Load into EMA model
+                ema_rdt.load_state_dict(new_ema_checkpoint, strict=False)
+
             global_step = int(path.split("-")[1])
 
             resume_global_step = global_step * args.gradient_accumulation_steps
@@ -476,6 +540,10 @@ def train(args, logger):
             logs.update(loss_for_log)
             # logger.info(logs)
             accelerator.log(logs, step=global_step)
+            # for name, param in rdt.named_parameters():
+            #     if param.requires_grad:
+            #         print(f"{name}: {param.device}, {param.dtype}")
+            # print(f"GPU Memory: {torch.cuda.max_memory_allocated() / 1e9:.2f}GB")
 
             if global_step >= args.max_train_steps:
                 break
@@ -483,25 +551,27 @@ def train(args, logger):
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        accelerator.unwrap_model(rdt).save_pretrained(args.output_dir)
-        ema_save_path = os.path.join(args.output_dir, f"ema")
+        # Save final model
+        base_model = accelerator.unwrap_model(rdt).base_model
+        base_model.save_pretrained(os.path.join(args.output_dir, "base_model"))
+        accelerator.unwrap_model(rdt).save_pretrained(os.path.join(args.output_dir, "adapter_model"))
+        
+        # Save EMA
+        ema_save_path = os.path.join(args.output_dir, "ema")
         accelerator.save_model(ema_rdt, ema_save_path)
         
-        logger.info(f"Saved Model to {args.output_dir}")
-
         if args.push_to_hub:
-            save_model_card(
-                repo_id,
-                base_model=args.pretrained_model_name_or_path,
-                repo_folder=args.output_dir,
-            )
+            # Modify patterns to include LoRA files
+            allow_patterns = [
+                "pytorch_model.bin", "*.json", "*.md",
+                "adapter_config.json", "adapter_model.bin"
+            ]
             upload_folder(
                 repo_id=repo_id,
                 folder_path=args.output_dir,
                 commit_message="End of training",
                 token=args.hub_token,
-                allow_patterns=["pytorch_model.bin", "*.json", "*.md"],
-                # ignore_patterns=["step_*", "epoch_*"],
+                allow_patterns=allow_patterns
             )
             
     accelerator.end_training()
